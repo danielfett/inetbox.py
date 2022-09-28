@@ -61,7 +61,7 @@ When started, the service will connect to the LIN bus and publish any status upd
 
 ### MQTT topics for receiving status
 
-`service/truma/error`: - some error messages are published here
+`service/truma/error` - some error messages are published here
 
 `service/truma/display_status/#` - frequent updates from CP Plus, similar to what is shown on the display. Note that not all values have been decoded yet.
 
