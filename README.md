@@ -47,6 +47,20 @@ systemctl start miqro_truma
 
 In the following, only the MQTT service will be explained. You need an MQTT broker running (e.g. [Mosquitto](https://mosquitto.org/)) for this to work and you should be familiar with basic MQTT concepts.
 
+Define the MQTT broker by creating the file `/etc/miqro.yml` with the broker settings as follows (adapt as needed):
+
+```yaml
+broker:
+  host: localhost
+  port: 1883
+  keepalive: 60
+  
+log_level: INFO
+
+services: {}
+
+```
+
 To run the service:
 ```
 truma_service
@@ -57,8 +71,6 @@ If you want to enable debugging, you can set the environment variables `DEBUG_LI
 Example:
 
 `DEBUG_LIN=1 truma_service`
-
-If you want to define a different MQTT broker or define a log level for the MQTT messages, create a file `/etc/miqro.yml` as described here: https://github.com/danielfett/miqro#configuration-file (note that there is no service-specific configuration for the truma service as of now).
 
 ## Initializing
 
