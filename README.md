@@ -109,6 +109,7 @@ There are some specifics for certain settings:
  * `target_temp_room` can be set to 0 to turn off the heating, and 5-30 degrees otherwise.
  * `heating_mode` can be set to `off`, `eco` and `high` and defines the fan intensity for room heating.
  * `target_temp_water` must be set to one of `0` (off), `40` (equivalent to selecting 'eco' on the display), `60` ('high'), or `200` (boost)
+ * `energy_mix` and `el_power_level` should be set together.
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
 
