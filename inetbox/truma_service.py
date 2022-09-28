@@ -1,18 +1,7 @@
 from serial import Serial
-from inetbox import InetboxLINProtocol, InetboxApp, Lin
+from . import InetboxLINProtocol, InetboxApp, Lin
 import miqro
 from os import environ
-
-"""
-MQTT topics:
-
-write:
-service/truma/control -> 1 to enable control by this service, 0 to disable
-
-read:
-service/truma/status/* various measurements from the bus
-
-"""
 
 
 class TrumaService(miqro.Service):
@@ -23,7 +12,9 @@ class TrumaService(miqro.Service):
         super().__init__(*args, **kwargs)
 
         self.inetapp = InetboxApp("DEBUG_APP" in environ)
-        self.inetprotocol = InetboxLINProtocol(self.inetapp, "DEBUG_PROTOCOL" in environ)
+        self.inetprotocol = InetboxLINProtocol(
+            self.inetapp, "DEBUG_PROTOCOL" in environ
+        )
         self.serial = Serial("/dev/ttyS0", 9600, timeout=0.03)
         self.lin = Lin(self.inetprotocol, "DEBUG_LIN" in environ)
 
@@ -39,9 +30,13 @@ class TrumaService(miqro.Service):
     @miqro.loop(seconds=3)
     def send_status(self):
         if self.inetapp.status_updated:
-            self.publish_json_keys(self.inetapp.get_all(), "control_status", only_if_changed=True)
-        
-        self.publish_json_keys(self.inetapp.display_status, "display_status", only_if_changed=True)
+            self.publish_json_keys(
+                self.inetapp.get_all(), "control_status", only_if_changed=True
+            )
+
+        self.publish_json_keys(
+            self.inetapp.display_status, "display_status", only_if_changed=True
+        )
 
     @miqro.handle("set/#")
     def handle_set_message(self, msg, topic):
@@ -52,5 +47,6 @@ class TrumaService(miqro.Service):
             # send via mqtt
             self.publish("error", str(e))
 
-if __name__ == "__main__":
+
+def run():
     miqro.run(TrumaService)
