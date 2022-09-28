@@ -1,0 +1,18 @@
+[tool.poetry]
+name = "inetbox-py"
+version = "0.1.0"
+description = ""
+authors = ["Daniel Fett <fett@danielfett.de>"]
+readme = "README.md"
+packages = [{include = "inetbox"}]
+
+[tool.poetry.dependencies]
+python = "^3.7"
+pyserial = "^3.5"
+miqro = "~1.1"
+bitstruct = "^8.15.1"
+
+
+[build-system]
+requires = ["poetry-core"]
+build-backend = "poetry.core.masonry.api"
