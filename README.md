@@ -30,9 +30,18 @@ The other pins (**INH**, **SLP**, second **GND**) are not used.
 
 ## Installation
 
-`pip3 install inetbox[truma_service]` is what you normally want to do.
+`pip3 install inetbox_py[truma_service]` is what you normally want to do.
 
-`pip3 install inetbox` installs just the library in case you want to develop your own code using it. 
+`pip3 install inetbox_py` installs just the library in case you want to develop your own code using it. 
+
+**After you have tested that the software works for you**, to install a system service using this software, run **as root**:
+
+```bash
+pip3 install inetbox_py[truma_service]
+truma_service --install
+systemctl enable miqro_truma
+systemctl start miqro_truma
+```
 
 ## Usage
 
