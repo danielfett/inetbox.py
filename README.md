@@ -30,6 +30,8 @@ The other pins (**INH**, **SLP**, second **GND**) are not used.
 
 ## Installation
 
+You first need to **enable UART** on the Pi. For this, follow the steps listed under "Configure UART on Raspberry Pi" on [this website](https://www.electronicwings.com/raspberry-pi/raspberry-pi-uart-communication-using-python-and-c#header2).
+
 `pip3 install inetbox_py[truma_service]` is what you normally want to do.
 
 `pip3 install inetbox_py` installs just the library in case you want to develop your own code using it. 
