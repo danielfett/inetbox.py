@@ -93,7 +93,7 @@ When started, the service will connect to the LIN bus and publish any status upd
 
 ### Changing settings
 
-In general, publish a message to `service/truma/set/<setting>` with the value you want to set. After restarting the service, wait a minute or so until the first set of values has been published before changing settings.
+In general, publish a message to `service/truma/set/<setting>` (where `<setting>` is one of the settings published in `service/truma/control_status/#`) with the value you want to set. After restarting the service, wait a minute or so until the first set of values has been published before changing settings.
 
 For example:
 
