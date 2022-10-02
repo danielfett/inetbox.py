@@ -69,6 +69,8 @@ log_level: INFO
 services: {}
 
 ```
+If you need to configure MQTT authentication and/or TLS settings, follow [these](https://github.com/danielfett/miqro#authentication-and-tls) instructions.
+
 
 By default, the application uses the serial port `/dev/serial0`. This should work fine on all Raspberry Pi versions, but in case you want to use a different port, you need to configure it in `/etc/miqro.yml` by adding a `services` section for the `truma` service like this (replacing the empty `services: {}` section above):
 
