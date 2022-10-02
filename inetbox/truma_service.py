@@ -2,11 +2,13 @@ from serial import Serial
 from . import InetboxLINProtocol, InetboxApp, Lin
 import miqro
 from os import environ
+from datetime import timedelta
 
 
 class TrumaService(miqro.Service):
     SERVICE_NAME = "truma"
     LOOP_INTERVAL = 0.001
+    VALUE_UPDATE_MAX_INTERVAL = timedelta(minutes=2)
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -33,11 +35,11 @@ class TrumaService(miqro.Service):
     def send_status(self):
         if self.inetapp.status_updated:
             self.publish_json_keys(
-                self.inetapp.get_all(), "control_status", only_if_changed=True
+                self.inetapp.get_all(), "control_status", only_if_changed=self.VALUE_UPDATE_MAX_INTERVAL
             )
 
         self.publish_json_keys(
-            self.inetapp.display_status, "display_status", only_if_changed=True
+            self.inetapp.display_status, "display_status", only_if_changed=self.VALUE_UPDATE_MAX_INTERVAL
         )
 
     @miqro.handle("set/#")
