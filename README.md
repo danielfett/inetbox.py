@@ -50,9 +50,9 @@ systemctl enable miqro_truma
 systemctl start miqro_truma
 ```
 
-## Usage
+## Using the MQTT Service
 
-In the following, only the MQTT service will be explained. You need an MQTT broker running (e.g. [Mosquitto](https://mosquitto.org/)) for this to work and you should be familiar with basic MQTT concepts.
+In the following, the MQTT service will be explained. You need an MQTT broker running (e.g. [Mosquitto](https://mosquitto.org/)) for this to work and you should be familiar with basic MQTT concepts.
 
 ### Configuration
 
@@ -115,11 +115,11 @@ Example:
 
 `DEBUG_LIN=1 truma_service`
 
-## MQTT Topics
+### MQTT Topics
 
 When started, the service will connect to the LIN bus and publish any status updates acquired from there. When you send a command to modify a setting (e.g., to turn on the heating), the service will send the command to the LIN bus and publish the new status once the setting has been confirmed.
 
-### MQTT topics for receiving status
+#### MQTT topics for receiving status
 
 `service/truma/error` - some error messages are published here
 
@@ -127,7 +127,7 @@ When started, the service will connect to the LIN bus and publish any status upd
 
 `service/truma/control_status/#` - less frequent updates, but includes values that can be modified. These are the values that would otherwise be available in the Truma inet app.
 
-### Changing settings
+#### Changing settings
 
 In general, publish a message to `service/truma/set/<setting>` (where `<setting>` is one of the settings published in `service/truma/control_status/#`) with the value you want to set. After restarting the service, wait a minute or so until the first set of values has been published before changing settings.
 
@@ -152,6 +152,20 @@ There are some specifics for certain settings:
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
 
+## Reading Log Files
+
+The tool [bin/read-logfile.py](bin/read-logfile.py) can be used to read log files created by, for example, a LIN bus logger. The file will be interpreted and the data will be printed to stdout.
+
+Usage: `python3 bin/read-logfile.py logfile.log`
+
+The log file is expected to have the following format:
+
+```
+<timestamp> <databyte[0]> <databyte[1]> <databyte[..]> <x> <y>
+```
+
+where `<x>` and `<y>` are ignored. If your file looks different, use `--first` to define the first data byte position (in the format above, 1), and `--last` to define the end of the data bytes (in the format above, -2). The values are interpreted as python slice indices, so you can use negative values to count from the end.
+
 ## Internals
 
 What does this software do internally?
@@ -159,9 +173,9 @@ What does this software do internally?
 The software tries to emulate the workings of the Truma iNet box. It plays the role of a 'slave' device on the LIN bus and listens for messages from the CP Plus. Selected messages are answered appropriately as to make the CP Plus think that the iNet box is present and working, and to send commands to the CP Plus.
 
 Two specific LIN messages are directly used to communicate with the CP Plus:
- * **PID 0x18** - the first bit defines whether a command for changing settings is ready at the iNet box. If the first bit is `1`, the CP Plus will send a message on the transport layer (see below) to request the settings update. See `InetboxLINProtocol.answer_to_d8_message` in (inetbox/inetbox.py)[inetbox/inetbox.py] for details.
+ * **PID 0x18** - the first bit defines whether a command for changing settings is ready at the iNet box. If the first bit is `1`, the CP Plus will send a message on the transport layer (see below) to request the settings update. See `InetboxLINProtocol.answer_to_d8_message` in [inetbox/inetbox.py](inetbox/inetbox.py) for details.
 
- * **PIDs 0x20-0x22** - contain frequent status updates closely resembling what is shown on the CP Plus display. It is unclear to me if the original iNet box observes these messages at all. Settings cannot be changed via these messaged. See `InetboxApp.parse_*` in (inetbox/inetbox.py)[inetbox/inetbox.py] for the implementation.
+ * **PIDs 0x20-0x22** - contain frequent status updates closely resembling what is shown on the CP Plus display. It is unclear to me if the original iNet box observes these messages at all. Settings cannot be changed via these messaged. See `InetboxApp.parse_*` in [inetbox/inetbox.py](inetbox/inetbox.py) for the implementation.
 
 The settings transfer from the CP Plus to the iNet box and vice versa (for modifying settings) is done via status buffers exchanged via the LIN transport layer. The relevant parts of the transport layer are implemented in this software. Please see the LIN specification for details on this layer. The low-level communication is based on the messages with PIDs 0x3C and 0x3D. 
 
@@ -170,7 +184,7 @@ A number of different status buffer types exist both for reading values from CP 
  * **ID 0x14, 0x33**: Coming from the CP Plus, this buffer contains most settings for heating (like target water temperature, current temperature, etc.).
  * **ID 0x0C, 0x32**: This status buffer is similar to the above, but is sent from the iNet box to the CP Plus for changing settings.
 
-See `InetboxApp.STATUS_*` in (inetbox/inetbox.py)[inetbox/inetbox.py] for details on the known buffer types.
+See `InetboxApp.STATUS_*` in [inetbox/inetbox.py](inetbox/inetbox.py) for details on the known buffer types.
 
 ## Acknowledgements
 

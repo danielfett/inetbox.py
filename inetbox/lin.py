@@ -213,7 +213,7 @@ class Lin:
                 return
             else:
                 self.log.debug(
-                    f"in < {format_bytes(line)} → not considering answer (enable --active to send answer)"
+                    f"in < {format_bytes(line)} → not considering answer (read-only mode)"
                 )
         else:
             line += serial.read(9)
