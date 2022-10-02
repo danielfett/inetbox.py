@@ -166,7 +166,22 @@ The log file is expected to have the following format:
 <timestamp> <databyte[0]> <databyte[1]> <databyte[..]> <x> <y>
 ```
 
-where `<x>` and `<y>` are ignored. If your file looks different, use `--first` to define the first data byte position (in the format above, 1), and `--last` to define the end of the data bytes (in the format above, -2). The values are interpreted as python slice indices, so you can use negative values to count from the end.
+where `<x>` and `<y>` are ignored. This is an example file:
+
+```
+00000,025   61                                                        9634    Checksum 
+00000,076   E2                                                        9615    Checksum 
+00000,126   3C  01  06  B8  40  03  00  00  FF      FC     classic    9615     
+00000,177   7D                                                        9615    Checksum 
+00000,228   D8                                                        9615    Checksum 
+00000,279   3C  7F  06  B2  00  17  46  00  1F      4B     classic    9615     
+00000,329   7D                                                        9615    Checksum 
+
+```
+
+Empty lines are ignored.
+
+If your file looks different, use `--first` to define the first data byte position (in the format above, 1), and `--last` to define the end of the data bytes (in the format above, -2). The values are interpreted as python slice indices, so you can use negative values to count from the end. 
 
 ## Internals
 
