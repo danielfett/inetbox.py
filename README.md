@@ -20,19 +20,26 @@ The software runs on a Raspberry Pi, any newer model should do. This could also 
 
 You need a [LIN to UART Transceiver](https://amzn.to/3E1qITr) (Affiliate Link!) for connecting the Raspberry Pi to the LIN bus. On the transceiver module, the connections are as follows:
 
- * **LIN** connects to Pin 4 on an RJ12 connector (the one with the 6 pins) going into any port on the Truma Combi heating, or using a [splitter module](https://amzn.to/3dL4bzT) (Affiliate Link!) into the existing connection between Combi and the control panel. The cable for Pin 4 should be colored green.
  * **GND** (any of the two) connects to a ground connection - e.g. on the power supply.
  * **12V** connects to a 12V power supply that also powers the Combi and CP Plus.
  * **TX** connects to pin 15 on the Raspberry Pi.
  * **RX** connects to pin 14 on the Raspberry Pi (14/15 might be the other way round, not sure).
+ * **LIN** connects to an RJ12 connector (alias 6P6C, the one with 6 pins) going into any port on the Truma Combi heating, or using a [splitter module](https://amzn.to/3dL4bzT) (Affiliate Link!) into the existing connection between Combi and the control panel. Use standard RJ12 cables for the connection. The relevant pin is highlighted in this picture: 
+
+![LIN Pin](./docs/pinout.jpg)
 
 The other pins (**INH**, **SLP**, second **GND**) are not used.
 
 ## Installation
 
-`pip3 install inetbox_py[truma_service]` is what you normally want to do.
+You first need to **enable UART** on the Pi. For this, follow the steps listed under "Configure UART on Raspberry Pi" on [this website](https://www.electronicwings.com/raspberry-pi/raspberry-pi-uart-communication-using-python-and-c#header2) until the step to reboot the Pi.
 
-`pip3 install inetbox_py` installs just the library in case you want to develop your own code using it. 
+Then install the software:
+
+ * If `pip3` is not installed, run `sudo apt install python3-pip` first.
+ * Then run `pip3 install inetbox_py[truma_service]` if you want to install everything.
+ * Alternatively, run `pip3 install inetbox_py` to just install the library in case you want to develop your own code using it. 
+
 
 **After you have tested that the software works for you**, to install a system service using this software, run **as root**:
 
@@ -122,7 +129,7 @@ When started, the service will connect to the LIN bus and publish any status upd
 
 ### Changing settings
 
-In general, publish a message to `service/truma/set/<setting>` with the value you want to set. After restarting the service, wait a minute or so until the first set of values has been published before changing settings.
+In general, publish a message to `service/truma/set/<setting>` (where `<setting>` is one of the settings published in `service/truma/control_status/#`) with the value you want to set. After restarting the service, wait a minute or so until the first set of values has been published before changing settings.
 
 For example:
 
