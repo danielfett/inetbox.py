@@ -15,7 +15,9 @@ class TrumaService(miqro.Service):
         self.inetprotocol = InetboxLINProtocol(
             self.inetapp, "DEBUG_PROTOCOL" in environ
         )
-        self.serial = Serial("/dev/ttyS0", 9600, timeout=0.03)
+        serial_device = self.service_config.get("serial_device", "/dev/serial0")
+        self.serial = Serial(serial_device, 9600, timeout=0.03)
+        self.log.info(f"Using serial device {serial_device}")
         self.lin = Lin(self.inetprotocol, "DEBUG_LIN" in environ)
 
     def _loop_step(self):
@@ -50,3 +52,6 @@ class TrumaService(miqro.Service):
 
 def run():
     miqro.run(TrumaService)
+
+if __name__ == "__main__":
+    run()

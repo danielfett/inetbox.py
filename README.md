@@ -47,6 +47,8 @@ systemctl start miqro_truma
 
 In the following, only the MQTT service will be explained. You need an MQTT broker running (e.g. [Mosquitto](https://mosquitto.org/)) for this to work and you should be familiar with basic MQTT concepts.
 
+### Configuration
+
 Define the MQTT broker by creating the file `/etc/miqro.yml` with the broker settings as follows (adapt as needed):
 
 ```yaml
@@ -61,20 +63,50 @@ services: {}
 
 ```
 
+By default, the application uses the serial port `/dev/serial0`. This should work fine on all Raspberry Pi versions, but in case you want to use a different port, you need to configure it in `/etc/miqro.yml` by adding a `services` section for the `truma` service like this (replacing the empty `services: {}` section above):
+
+
+```yaml
+services:
+  truma:
+    serial_port: /dev/ttyS0
+```
+
 To run the service:
 ```
 truma_service
 ```
+
+
+### Initializing
+
+This script plays the role of the inet box. You might need to initialize CP Plus again to make the fake inet box known to the system. This is an easy step that can safely be repeated (no settings are lost): After starting the software, go to the settings menu on the CP Plus and select "PR SET". The display will show "Init..." and after a few seconds, the initialization will be completed.
+
+### Does it work?
+
+If the connection works, it can take up to a minute to receive the first status data. Everything is fine if you see the last line shown in the following in the service output:
+
+```
+2022-10-02 14:20:38,787  truma.main  WARNING    Service configuration for truma not found in 'services' section of configuration file /etc/miqro.yml. Using empty configuration.
+2022-10-02 14:20:38,788  truma.main  INFO       started
+2022-10-02 14:20:38,790  truma.main  INFO       Using serial device /dev/serial0
+2022-10-02 14:20:38,792  truma.main  INFO       Loop stats:
+2022-10-02 14:20:38,793  truma.main  INFO        - Loop(_update_online_status) called 0 times, average duration 0.0s, load=0%
+2022-10-02 14:20:38,794  truma.main  INFO        - Loop(send_status) called 0 times, average duration 0.0s, load=0%
+2022-10-02 14:20:38,806  truma.main  INFO       MQTT connected, client=<paho.mqtt.client.Client object at 0xb5ee3090>, userdata=None, rc=0
+2022-10-02 14:20:38,806  truma.main  INFO       Subscribing to ...
+2022-10-02 14:20:38,807  truma.main  INFO         - service/truma/set/#
+2022-10-02 14:20:38,807  truma.main  INFO         - service/truma/enabled
+2022-10-02 14:21:27,234  inet-lin  INFO         Received status data from cp plus
+```
+
+### Debugging
 
 If you want to enable debugging, you can set the environment variables `DEBUG_LIN=1`, `DEBUG_PROTOCOL=1`, and `DEBUG_APP=1`, to debug the LIN bus (byte level communication), the protocol layer (handing LIN bus specifics), and the application layer (handling the actual data), respectively.
 
 Example:
 
 `DEBUG_LIN=1 truma_service`
-
-## Initializing
-
-This script plays the role of the inet box. You might need to initialize CP Plus again to make the fake inet box known to the system. This is an easy step that can safely be repeated (no settings are lost): After starting the software, go to the settings menu on the CP Plus and select "PR SET". The display will show "Init..." and after a few seconds, the initialization will be completed.
 
 ## MQTT Topics
 
@@ -112,6 +144,26 @@ There are some specifics for certain settings:
  * `energy_mix` and `el_power_level` should be set together.
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
+
+## Internals
+
+What does this software do internally?
+
+The software tries to emulate the workings of the Truma iNet box. It plays the role of a 'slave' device on the LIN bus and listens for messages from the CP Plus. Selected messages are answered appropriately as to make the CP Plus think that the iNet box is present and working, and to send commands to the CP Plus.
+
+Two specific LIN messages are directly used to communicate with the CP Plus:
+ * **PID 0x18** - the first bit defines whether a command for changing settings is ready at the iNet box. If the first bit is `1`, the CP Plus will send a message on the transport layer (see below) to request the settings update. See `InetboxLINProtocol.answer_to_d8_message` in (inetbox/inetbox.py)[inetbox/inetbox.py] for details.
+
+ * **PIDs 0x20-0x22** - contain frequent status updates closely resembling what is shown on the CP Plus display. It is unclear to me if the original iNet box observes these messages at all. Settings cannot be changed via these messaged. See `InetboxApp.parse_*` in (inetbox/inetbox.py)[inetbox/inetbox.py] for the implementation.
+
+The settings transfer from the CP Plus to the iNet box and vice versa (for modifying settings) is done via status buffers exchanged via the LIN transport layer. The relevant parts of the transport layer are implemented in this software. Please see the LIN specification for details on this layer. The low-level communication is based on the messages with PIDs 0x3C and 0x3D. 
+
+A number of different status buffer types exist both for reading values from CP Plus as well as for writing values to CP Plus. The buffers can be identified by two bytes that follow a 10-byte preamble that is always the same. For example:
+
+ * **ID 0x14, 0x33**: Coming from the CP Plus, this buffer contains most settings for heating (like target water temperature, current temperature, etc.).
+ * **ID 0x0C, 0x32**: This status buffer is similar to the above, but is sent from the iNet box to the CP Plus for changing settings.
+
+See `InetboxApp.STATUS_*` in (inetbox/inetbox.py)[inetbox/inetbox.py] for details on the known buffer types.
 
 ## Acknowledgements
 

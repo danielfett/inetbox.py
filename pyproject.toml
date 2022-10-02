@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "inetbox-py"
-version = "0.1.0"
+version = "0.1.1"
 description = ""
 authors = ["Daniel Fett <fett@danielfett.de>"]
 readme = "README.md"
@@ -9,7 +9,7 @@ packages = [{include = "inetbox"}]
 [tool.poetry.dependencies]
 python = "^3.7"
 pyserial = "^3.5"
-miqro = "~1.1"
+miqro = "~1.1, >=1.1.1"
 bitstruct = "^8.15.1"
 paho-mqtt = {version = "^1.6.1", optional = true}
 

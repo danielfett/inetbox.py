@@ -476,7 +476,7 @@ class InetboxApp:
         try:
             status_buffer_info = self.STATUS_BUFFER_TYPES[header]
         except KeyError:
-            self.log.error(f"Unknown status buffer type {header}")
+            self.log.warning(f"Unknown status buffer type {header}")
             return
 
         # parse status buffer, starting after the header
