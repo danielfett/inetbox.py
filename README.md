@@ -52,7 +52,7 @@ systemctl start miqro_truma
 
 ## Updating
 ```
-Run **as root**:
+If you have installed the service and want to update it, run **as root**:
 
 ```bash
 pip3 install --upgrade inetbox_py[truma_service]
