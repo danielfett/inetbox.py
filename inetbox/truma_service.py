@@ -18,8 +18,8 @@ class TrumaService(miqro.Service):
             self.inetapp, "DEBUG_PROTOCOL" in environ
         )
         serial_device = self.service_config.get("serial_device", "/dev/serial0")
-        self.serial = Serial(serial_device, 9600, timeout=0.03)
-        self.log.info(f"Using serial device {serial_device}")
+        self.log.info(f"Opening serial device {serial_device} in exclusive mode")
+        self.serial = Serial(serial_device, 9600, timeout=0.03, exclusive=True)
         self.lin = Lin(self.inetprotocol, "DEBUG_LIN" in environ)
 
     def _loop_step(self):
