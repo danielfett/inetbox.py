@@ -50,6 +50,15 @@ systemctl enable miqro_truma
 systemctl start miqro_truma
 ```
 
+## Updating
+```
+Run **as root**:
+
+```bash
+pip3 install --upgrade inetbox_py[truma_service]
+systemctl restart miqro_truma
+```
+
 ## Using the MQTT Service
 
 In the following, the MQTT service will be explained. You need an MQTT broker running (e.g. [Mosquitto](https://mosquitto.org/)) for this to work and you should be familiar with basic MQTT concepts.
