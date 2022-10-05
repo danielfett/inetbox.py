@@ -43,24 +43,7 @@ Then install the software:
  * Then run `pip3 install inetbox_py[truma_service]` if you want to install everything.
  * Alternatively, run `pip3 install inetbox_py` to just install the library in case you want to develop your own code using it. 
 
-
-**After you have tested that the software works for you**, to install a system service using this software, run **as root**:
-
-```bash
-pip3 install inetbox_py[truma_service]
-truma_service --install
-systemctl enable miqro_truma
-systemctl start miqro_truma
-```
-
-## Updating
-```
-If you have installed the service and want to update it, run **as root**:
-
-```bash
-pip3 install --upgrade inetbox_py[truma_service]
-systemctl restart miqro_truma
-```
+There is also a systemd service to run the script at every startup. The details are explained below.
 
 ## Using the MQTT Service
 
@@ -165,6 +148,26 @@ There are some specifics for certain settings:
  * `energy_mix` and `el_power_level` should be set together.
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
+
+### Installing the System Service
+
+**After you have tested that the software works for you**, to install a systemd service using this software, run **as root**:
+
+```bash
+pip3 install inetbox_py[truma_service]
+truma_service --install
+systemctl enable miqro_truma
+systemctl start miqro_truma
+```
+
+### Updating
+```
+If you have installed the service and want to update it, run **as root**:
+
+```bash
+pip3 install --upgrade inetbox_py[truma_service]
+systemctl restart miqro_truma
+```
 
 ## Reading Log Files
 
