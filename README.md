@@ -30,6 +30,9 @@ You need a [LIN to UART Transceiver](https://amzn.to/3E1qITr) (Affiliate Link!) 
 
 The other pins (**INH**, **SLP**, second **GND**) are not used.
 
+
+![Connections](./docs/connections.png)
+
 ## Installation
 
 You first need to **enable UART** on the Pi. For this, follow the steps listed under "Configure UART on Raspberry Pi" on [this website](https://www.electronicwings.com/raspberry-pi/raspberry-pi-uart-communication-using-python-and-c#header2) until the step to reboot the Pi.
