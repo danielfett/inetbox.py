@@ -149,7 +149,7 @@ There are some specifics for certain settings:
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
 
-### Installing the System Service
+### Installing the Systemd Service
 
 **After you have tested that the software works for you**, to install a systemd service using this software, run **as root**:
 
@@ -159,6 +159,8 @@ truma_service --install
 systemctl enable miqro_truma
 systemctl start miqro_truma
 ```
+
+Take care **not to run the service and the script in parallel** as this will lead to errors (MQTT connection failures with `rc=7` in the log file and errors connecting to the serial interface).
 
 ### Updating
 ```
