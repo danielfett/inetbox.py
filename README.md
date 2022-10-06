@@ -171,7 +171,7 @@ pip3 install --upgrade inetbox_py[truma_service]
 systemctl restart miqro_truma
 ```
 
-## Reading Log Files
+## Advanced Use: Reading Low-Level LIN Log Files
 
 The tool [bin/read-logfile.py](bin/read-logfile.py) can be used to read log files created by, for example, a LIN bus logger. The file will be interpreted and the data will be printed to stdout.
 
@@ -183,7 +183,7 @@ The log file is expected to have the following format:
 <timestamp> <databyte[0]> <databyte[1]> <databyte[..]> <x> <y>
 ```
 
-where `<x>` and `<y>` are ignored. This is an example file:
+where data bytes are stored in hexadeximal representation and `<x>` and `<y>` are ignored. This is an example file:
 
 ```
 00000,025   61                                                        9634    Checksum 
