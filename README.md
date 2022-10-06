@@ -37,6 +37,12 @@ The other pins (**INH**, **SLP**, second **GND**) are not used.
 
 You first need to **enable UART** on the Pi. For this, follow the steps listed under "Configure UART on Raspberry Pi" on [this website](https://www.electronicwings.com/raspberry-pi/raspberry-pi-uart-communication-using-python-and-c#header2) until the step to reboot the Pi.
 
+You should also enable access to the serial port for the `pi` user:
+```bash
+sudo adduser pi dialout
+```
+Then **log out and log in again** or **reboot** to activate the permission.
+
 Then install the software:
 
  * If `pip3` is not installed, run `sudo apt install python3-pip` first.
