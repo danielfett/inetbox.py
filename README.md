@@ -16,6 +16,10 @@ That said, it is working for me, and I hope it will work for you, too.
 
 This has been tested with a Truma Combi 4 and the CP Plus control panel (inet ready). I don't see why this wouldn't be working with the Combi 6 and E models as well.
 
+**Important: Your CP Plus needs to be "inet ready".**
+
+![CP Plus](./docs/cpplus.jpg)
+
 The software runs on a Raspberry Pi, any newer model should do. This could also be ported to a Pi Pico Microcontroller, but I haven't done that yet.
 
 You need a [LIN to UART Transceiver](https://amzn.to/3E1qITr) (Affiliate Link!) for connecting the Raspberry Pi to the LIN bus. On the transceiver module, the connections are as follows:
