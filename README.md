@@ -24,16 +24,17 @@ The software runs on a Raspberry Pi, any newer model should do. This could also 
 
 You need a [LIN to UART Transceiver](https://amzn.to/3E1qITr) (Affiliate Link!) for connecting the Raspberry Pi to the LIN bus. On the transceiver module, the connections are as follows:
 
- * **GND** (any of the two) connects to a ground connection - e.g. on the power supply.
  * **12V** connects to a 12V power supply that also powers the Combi and CP Plus.
- * **TX** connects to pin 15 on the Raspberry Pi.
- * **RX** connects to pin 14 on the Raspberry Pi (14/15 might be the other way round, not sure).
- * **LIN** connects to an RJ12 connector (alias 6P6C, the one with 6 pins) going into any port on the Truma Combi heating, or using a [splitter module](https://amzn.to/3dL4bzT) (Affiliate Link!) into the existing connection between Combi and the control panel. Use standard RJ12 cables for the connection. The relevant pin is highlighted in this picture: 
+ * **TX** connects to GPIO 15 on the Raspberry Pi (RX).
+ * **RX** connects to GPIO 14 on the Raspberry Pi (TX).
+ * **LIN** connects to the RJ12 connector (see below), Pin 3. 
+ * **GND** connects to the RJ12 connector (see below), Pin 5.
+ * The second **GND** should connect to one of the GND pins on the Raspberry Pi.
+ * The other pins (**INH** and **SLP**) are not used.
+
+ The RJ12 connector (alias 6P6C, the one with 6 pins) goes to any port on the Truma Combi heating, or using a [splitter module](https://amzn.to/3dL4bzT) (Affiliate Link!) into the existing connection between Combi and the control panel. Use standard RJ12 cables for the connection. The relevant pins are highlighted in this picture: 
 
 ![LIN Pin](./docs/pinout.jpg)
-
-The other pins (**INH**, **SLP**, second **GND**) are not used.
-
 
 ![Connections](./docs/connections.png)
 
