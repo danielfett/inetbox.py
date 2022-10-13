@@ -189,7 +189,7 @@ systemctl start miqro_truma
 Take care **not to run the service and the script in parallel** as this will lead to errors (MQTT connection failures with `rc=7` in the log file and errors connecting to the serial interface).
 
 ### Updating
-```
+
 If you have installed the service and want to update it, run **as root**:
 
 ```bash
