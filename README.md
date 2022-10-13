@@ -65,7 +65,7 @@ At the end of the above-described installation, you might get the following warn
   WARNING: The script truma_service is installed in '/home/pi/.local/bin' which is not on PATH.
   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
 ```
-Then add /home/pi/.local/bin to your PATH (i.e. at the end of ~/.bashrc) by the following commands. The first one adds `export PATH="$HOME/.local/bin:$PATH"` to the logged in user's .bashrc, and the second command reloads the .bashrc settings without the need to relogin:
+Then add `/home/pi/.local/bin` to your PATH (e.g., at the end of `~/.bashrc`) using the following commands. The first one adds `export PATH="$HOME/.local/bin:$PATH"` to the logged in user's `.bashrc`, and the second command reloads the `.bashrc` settings without the need to relogin:
 ```
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 . ~/.bashrc
