@@ -239,6 +239,13 @@ Two specific LIN messages are directly used to communicate with the CP Plus:
 
 The settings transfer from the CP Plus to the iNet box and vice versa (for modifying settings) is done via status buffers exchanged via the LIN transport layer. The relevant parts of the transport layer are implemented in this software. Please see the LIN specification for details on this layer. The low-level communication is based on the messages with PIDs 0x3C and 0x3D. 
 
+Messages on the transport layer are identified by an 'SID'. The following SIDs are known:
+
+ * **SID 0xB9** - likely a heartbeat request or similar. The expected answer is just a `0x00` byte.
+ * **SID 0xB0** - assign NAD (network address) command. Has to be answered, empty payload.
+ * **SID 0xBA** - request for data upload (i.e., from iNet box to CP Plus). The payload is a status buffer (see below).
+ * **SID 0xBB** - data download (i.e., from CP Plus to iNet box). The payload is a status buffer (see below).
+
 A number of different status buffer types exist both for reading values from CP Plus as well as for writing values to CP Plus. The buffers can be identified by two bytes that follow a 10-byte preamble that is always the same. For example:
 
  * **ID 0x14, 0x33**: Coming from the CP Plus, this buffer contains most settings for heating (like target water temperature, current temperature, etc.).
