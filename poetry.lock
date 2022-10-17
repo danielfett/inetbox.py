@@ -8,7 +8,7 @@ python-versions = "*"
 
 [[package]]
 name = "miqro"
-version = "1.1.0"
+version = "1.2.0"
 description = "MIQRO is an MQTT Micro-Service Library for Python"
 category = "main"
 optional = false
@@ -48,18 +48,21 @@ category = "main"
 optional = false
 python-versions = ">=3.6"
 
+[extras]
+truma_service = ["paho-mqtt"]
+
 [metadata]
 lock-version = "1.1"
 python-versions = "^3.7"
-content-hash = "0736d25b3f0c9b79e899d067e3ef00e90b218d6f61da2d205a40d4256a09f91b"
+content-hash = "73e49eb96131df36c9ef6e64e9c2029548d1427cdd1424d6514ed2f136d73eb5"
 
 [metadata.files]
 bitstruct = [
     {file = "bitstruct-8.15.1.tar.gz", hash = "sha256:6fa6adbfb8f3b8cb68c21b13aa65d23eb2c3ac32419ab926f3fd1fff717a9125"},
 ]
 miqro = [
-    {file = "miqro-1.1.0-py3-none-any.whl", hash = "sha256:ba43fd521fef4336e4230c1f3483f7b5df5a914c45bff294b210fd7a142e15d9"},
-    {file = "miqro-1.1.0.tar.gz", hash = "sha256:23689de6cef9af47ab2beb8ac62036cf067ad6f40b7f679cac78ec657539210c"},
+    {file = "miqro-1.2.0-py3-none-any.whl", hash = "sha256:dd2573794d1226e3df06f6977ace0a04f9b7b8b9c3ac4098eb4597f1682894df"},
+    {file = "miqro-1.2.0.tar.gz", hash = "sha256:94f4de1642a50b938932680da2b10f496e6945beb6698dc9392785872add9830"},
 ]
 paho-mqtt = [
     {file = "paho-mqtt-1.6.1.tar.gz", hash = "sha256:2a8291c81623aec00372b5a85558a372c747cbca8e9934dfe218638b8eefc26f"},
