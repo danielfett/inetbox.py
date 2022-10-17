@@ -152,7 +152,7 @@ When started, the service will connect to the LIN bus and publish any status upd
 
 #### Changing settings
 
-In general, before you change a setting, restart the service (`sudo systemctl restart miqro_truma`) and wait a minute or so until the first set of values has been published. Then publish a message to `service/truma/set/<setting>` (where `<setting>` is one of the settings published in `service/truma/control_status/#)` with the value you want to set.
+In general, before changing any settings, restart the service (`sudo systemctl restart miqro_truma`) and wait a minute or so until the first set of values has been published. Then publish a message to `service/truma/set/<setting>` (where `<setting>` is one of the settings published in `service/truma/control_status/#)` with the value you want to set.
 
 For example:
 
