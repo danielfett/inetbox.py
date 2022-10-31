@@ -17,7 +17,7 @@ class InetboxLINProtocol:
 
     def __init__(self, app, debug=False):
         self.app = app
-        self.log = logging.getLogger("inet-lin")
+        self.log = logging.getLogger("inet.protocol")
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
 
@@ -32,6 +32,7 @@ class InetboxLINProtocol:
             # This request is probably a heartbeat request or similar.
             # Expected answer is just a 0x00 byte.
             # We here add all frames that will be sent to the response buffer.
+            self.log.info("Received heartbeat request.")
             lin.prepare_transportlayer_response(
                 [bytes([self.NODE_ADDRESS, 0x02, 0xF9, 0x00, 0xFF, 0xFF, 0xFF, 0xFF])]
             )
@@ -40,6 +41,7 @@ class InetboxLINProtocol:
             and sid == 0xB0
             and payload.startswith(self.IDENTIFIER)
         ):
+            self.log.info("Received request to assign network address.")
             # Assign NAD request - has to be answered, empty payload
             if payload[-1] != self.NODE_ADDRESS:
                 raise Exception(
@@ -88,7 +90,7 @@ class InetboxLINProtocol:
 
     def _complete_transportlayer_request(self, lin: Lin, sid, request_payload):
         if sid == 0xBB:
-            self.log.info("Received status data from cp plus")
+            self.log.info("Received status data from CP Plus")
             lin.prepare_transportlayer_response(
                 [bytes([self.NODE_ADDRESS, 0x01, 0xFB, 0xFF, 0xFF, 0xFF, 0xFF, 0xFF])]
             )
@@ -127,13 +129,13 @@ class InetboxLINProtocol:
             )
 
     def receive_read_by_identifier_request(self, lin: Lin):
-        self.log.debug("Received read by identifier request.")
+        self.log.info("Received read by identifier request.")
         lin.prepare_transportlayer_response(
             [bytes([self.NODE_ADDRESS, 0x06, 0xF2]) + self.IDENTIFIER + bytes([0x00])]
         )
 
     def answer_to_d8_message(self):
-        self.log.debug(
+        self.log.info(
             f"Responding to 08 message (updates_to_send={self.app.updates_to_send})!"
         )
         return bytes(
@@ -371,7 +373,7 @@ class InetboxApp:
     display_status = {}
 
     def __init__(self, debug):
-        self.log = logging.getLogger("app")
+        self.log = logging.getLogger("inet.app")
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
 

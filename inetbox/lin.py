@@ -28,7 +28,7 @@ class Lin:
 
     def __init__(self, protocol, debug=False):
         self.protocol = protocol
-        self.log = logging.getLogger("lin")
+        self.log = logging.getLogger("inet.lin")
 
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)

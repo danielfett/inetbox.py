@@ -138,6 +138,24 @@ Example:
 
 `DEBUG_LIN=1 truma_service`
 
+Specify `LOG_DIR` to additionally write all logs to a file in the specified directory. Make sure that the directory exists and that the user running the service has write access to it.
+
+Important: Enabling all log options will result in a lot of output. Make sure to disable them again after debugging.
+
+You can also specify debug settings in the `miqro.yml` file:
+
+```yaml
+
+services:
+  truma:
+    log_dir: /var/log/truma
+    debug_app: True
+    debug_lin: True
+    debug_protocol: True
+```
+
+
+
 ### MQTT Topics
 
 When started, the service will connect to the LIN bus and publish any status updates acquired from there. When you send a command to modify a setting (e.g., to turn on the heating), the service will send the command to the LIN bus and publish the new status once the setting has been confirmed.
