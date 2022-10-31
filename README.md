@@ -193,6 +193,20 @@ There are some specifics for certain settings:
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
 
+Note: Since some settings only work together, like `target_temp_room` and `heating_mode`, the service does not apply changes immediately. Instead, changed settings are collected and only applied after a wait time of about a seconds. To change this time, set the `updates_buffer_time` setting in the `miqro.yml` file to the desired wait time in seconds.
+
+The topic `service/truma/update_status` gives information about the status of the pushed setting changes:
+
+ * `waiting_for_cp_plus` means that there is no connection yet to CP Plus and settings will only be applied after a connection has been established. In normal circumstances, this can take up to a minute.
+ * `waiting_commit` means that the service waits for more changes (see above) before applying them.
+ * `waiting_truma` means that the service waits for the CP Plus to ask for a settings update before the service can send the changed settings. This should not take more than about 10 seconds.
+ * `idle` means that there are no pending setting changes.
+
+The topic `service/truma/cp_plus_status` gives information about the connection to CP Plus:
+
+ * `online` means that the service is connected to CP Plus and is receiving status updates.
+ * `waiting` means that the service is not connected to CP Plus and is not receiving status updates. This can happen after a restart of the service. When you send a settings change command, the `update_status` will be `waiting_for_cp_plus` until the service is connected. 
+
 ### Installing the Systemd Service
 
 **After you have tested that the software works for you**, to install a systemd service using this software, run **as root**:

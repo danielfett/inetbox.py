@@ -128,6 +128,8 @@ class InetboxLINProtocol:
                 ]
             )
 
+            self.log.info("Uploading new status data.")
+
     def receive_read_by_identifier_request(self, lin: Lin):
         self.log.info("Received read by identifier request.")
         lin.prepare_transportlayer_response(
@@ -364,11 +366,13 @@ class InetboxApp:
 
     STATUS_HEADER_CHECKSUM_START = 8
 
-    status = {"_command_counter": 0}
+    status = {"_command_counter": 128}
 
     status_updated = False
 
-    updates_to_send = False
+    updates_to_send = {}
+
+    can_send_updates = False
 
     display_status = {}
 
@@ -488,10 +492,11 @@ class InetboxApp:
 
         # if any of the values is new, set self.status_updated to True, ignore underscore keys
         self.status_updated = True
+        self.can_send_updates = True
         self.status.update(parsed_status_buffer)
 
         # log
-        self.log.debug(
+        self.log.info(
             f"Received status buffer update for {header}: {parsed_status_buffer}"
         )
 
@@ -503,6 +508,7 @@ class InetboxApp:
         status_buffer_info = self.STATUS_BUFFER_TYPES[status_buffer_header]
 
         if not self.updates_to_send:
+            self.log.info("No updates to send.")
             return None
 
         # increase output message counter
@@ -512,10 +518,10 @@ class InetboxApp:
 
         # get current status buffer contents as dict
         try:
-            binary_buffer_contents = status_buffer_info["bitstruct"].pack(self.status)
+            binary_buffer_contents = status_buffer_info["bitstruct"].pack({**self.status, **self.updates_to_send})
         except bitstruct.Error:
             # not all required data in status buffer yet
-            self.updates_to_send = False
+            self.can_send_updates = False
             return None
 
         # calculate checksum
@@ -528,9 +534,9 @@ class InetboxApp:
         )
 
         # now pack again with correct checksum
-        binary_buffer_contents = status_buffer_info["bitstruct"].pack(self.status)
+        binary_buffer_contents = status_buffer_info["bitstruct"].pack({**self.status, **self.updates_to_send})
 
-        self.updates_to_send = False
+        self.updates_to_send = {}
 
         return (
             self.STATUS_BUFFER_PREAMBLE + status_buffer_header + binary_buffer_contents
@@ -552,17 +558,15 @@ class InetboxApp:
         # set the respective key in self.status, if it exists, and apply the conversion function
         if key.startswith("_"):
             self.log.info(f"Setting unknown {key} to {value}")
-            self.status[key] = value
-            self.updates_to_send = True
+            self.updates_to_send[key] = value
             return
         if key not in self.STATUS_CONVERSION_FUNCTIONS:
             raise Exception("Conversion function not defined - is this key defined?")
         if self.STATUS_CONVERSION_FUNCTIONS[key][1] is None:
             raise Exception("Conversion function not defined - is this key writable?")
         self.log.info(f"Setting {key} to {value}")
-        self.status[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value)
-        self.updates_to_send = True
-
+        self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value)
+        
     def get_all(self):
         self.status_updated = False
         return {key: self.get_status(key) for key in self.status}
