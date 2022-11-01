@@ -1,6 +1,6 @@
 [tool.poetry]
 name = "inetbox-py"
-version = "0.2"
+version = "0.3"
 description = ""
 authors = ["Daniel Fett <fett@danielfett.de>"]
 readme = "README.md"
