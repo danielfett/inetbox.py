@@ -99,7 +99,7 @@ By default, the application uses the serial port `/dev/serial0`. This should wor
 ```yaml
 services:
   truma:
-    serial_port: /dev/ttyS0
+    serial_device: /dev/ttyS0
 ```
 
 To run the service:
