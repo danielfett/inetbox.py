@@ -54,6 +54,17 @@ class TrumaService(miqro.Service):
         self.log.info(f"Opening serial device {serial_device} in exclusive mode")
         self.serial = Serial(serial_device, baudrate, timeout=timeout, exclusive=True)
         self.lin = Lin(self.inetprotocol, debug_lin)
+        
+    def _on_connect(self, *args, **kwargs):
+        super()._on_connect(*args, **kwargs)
+        
+        try:
+            self.log.info(f"Trying to send home assistant discovery messages...")
+            from .haconfig import haconfig
+            haconfig.del_ha_autoconfig(self) 
+            haconfig.set_ha_autoconfig(self)
+        except ImportError:
+            self.log.warning(f"no module `haconfig` for discovery message to home assistant loaded")
 
     def _loop_step(self):
         assert self.LOOPS is not None

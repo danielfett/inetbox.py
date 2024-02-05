@@ -158,7 +158,8 @@ services:
 
 ### MQTT Topics
 
-When started, the service will connect to the LIN bus and publish any status updates acquired from there. When you send a command to modify a setting (e.g., to turn on the heating), the service will send the command to the LIN bus and publish the new status once the setting has been confirmed.
+When started, the service will connect to the LIN bus and publish any status updates acquired from there. When you send a command to modify a setting (e.g., to turn on the heating), the service will send the command to the LIN bus and publish the new status once the setting has been confirmed.  
+Also on startup, the service will send auto discovery messages for home assistant, which can be used with the `truma.yaml` and `truma.ll` from https://github.com/mc0110/inetbox2mqtt/tree/4880ceb2e7c2cef8fbaaed29d5489c2c9d7603b5/doc.
 
 #### MQTT topics for receiving status
 
