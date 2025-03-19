@@ -5,6 +5,7 @@ from .lin import Lin
 from .tools import format_bytes, calculate_checksum
 from . import conversions as cnv
 import bitstruct
+from dataclasses import dataclass
 
 
 class InetboxLINProtocol:
@@ -114,6 +115,9 @@ class InetboxLINProtocol:
                 self.log.debug("Not responding, waiting for status message first!")
                 return
 
+            # pad the buffer with zeros
+            send_buffer += bytes(38 - len(send_buffer))
+
             lin.prepare_transportlayer_response(
                 [
                     bytes(
@@ -159,6 +163,24 @@ class InetboxLINProtocol:
         return self.app.handle_message(pid, databytes)
 
     ANSWER_TO_PIDS = {0x18: answer_to_d8_message}
+
+
+@dataclass
+class TrumaCommand:
+    cid: int
+    read_len: int
+    write_len: int
+    bitstruct: bitstruct.CompiledFormat
+
+    def parse(self, byte_data):
+        return self.bitstruct.unpack(byte_data)
+
+    def pack(self, data):
+        return self.bitstruct.pack(data)[: self.write_len]
+
+    @property
+    def cid_write(self):
+        return self.cid - 1
 
 
 class InetboxApp:
@@ -226,19 +248,101 @@ class InetboxApp:
         [0x00, 0x1E, 0x00, 0x00, 0x22, 0xFF, 0xFF, 0xFF, 0x54, 0x01]
     )
 
-    STATUS_BUFFER_HEADER_02 = bytes([0x02, 0x0D])
+    COMMAND_STATUS = TrumaCommand(
+        cid=0x33,  # when receiving, sending is that -1
+        read_len=0x14,
+        write_len=0x0C,
+        bitstruct=bitstruct.compile(
+            ">u16u8u8u16u16u16u8u8u16u16u8r16u8<",
+            names=[
+                "target_temp_room",
+                "heating_mode",
+                "_recv_status_u3",
+                "el_power_level",
+                "target_temp_water",
+                "el_power_level",
+                "energy_mix",
+                "energy_mix",
+                "current_temp_water",
+                "current_temp_room",
+                "operating_status",
+                "error_code",
+                "_recv_status_u10",
+            ],
+        ),
+    )
 
-    STATUS_BUFFER_HEADER_RECV_STATUS = bytes([0x14, 0x33])
-    STATUS_BUFFER_HEADER_WRITE_STATUS = bytes([0x0C, 0x32])
+    COMMAND_TIMER = TrumaCommand(
+        cid=0x3D,
+        read_len=0x18,
+        write_len=0x10,
+        bitstruct=bitstruct.compile(
+            ">u16u8u8u8u8u16u8u8u8u8u16u16u8u8u8u8u8u8u8u8<",
+            names=[
+                "timer_target_temp_room",
+                "timer_heating_mode",
+                "_timer_unknown1",
+                "timer_el_power_level",
+                "_timer_unknown5",
+                "timer_target_temp_water",
+                "_timer_unknown6",
+                "_timer_unknown7",
+                "_timer_unknown8",
+                "_timer_unknown9",
+                "_timer_unknown10",
+                "_timer_unknown11",
+                "_timer_unknown10",
+                "_timer_unknown11",
+                "_timer_unknown12",
+                "_timer_unknown13",
+                "_timer_unknown14",
+                "_timer_unknown15",
+                "_timer_unknown16",
+                "_timer_unknown17",
+                "timer_active",
+                "timer_start_minutes",
+                "timer_start_hours",
+                "timer_stop_minutes",
+                "timer_stop_hours",
+            ],
+        ),
+    )
 
-    STATUS_BUFFER_HEADER_TIMER = bytes([0x18, 0x3D])
-    STATUS_BUFFER_HEADER_TIMER_WRITE = bytes([0x10, 0x3C])  # not tested
+    COMMAND_TIME = TrumaCommand(
+        cid=0x15,
+        read_len=0x0A,
+        write_len=0x08,
+        bitstruct=bitstruct.compile(
+            ">u8u8u8u8u8u8u8u8u8u8<",
+            names=[
+                "wall_time_hours",
+                "wall_time_minutes",
+                "wall_time_seconds",
+                "_time_display1",
+                "_time_display2",
+                "_time_display3",
+                "clock_mode",
+                "clock_source",
+                "_time_display4",
+                "_time_display5",
+            ],
+        ),
+    )
 
-    STATUS_BUFFER_TIME = bytes([0x0A, 0x15])
-    STATUS_BUFFER_TIME_WRITE = bytes([0x02, 0x14])  # guessed!
+    COMMANDS = {
+        0x33: COMMAND_STATUS,
+        0x3D: COMMAND_TIMER,
+        0x15: COMMAND_TIME,
+    }
+
+    STATUS_BUFFER_COMMAND_ID_COMMAND_COUNTER = 0x0D
+    """"
+    "STATUS_BUFFER_COMMAND_ID_STATUS = 0x33
+    STATUS_BUFFER_COMMAND_ID_TIMER = 0x3D  # when receiving, sending is that -1
+    STATUS_BUFFER_COMMAND_ID_TIME = 0x15  # when receiving, sending is that -1
 
     STATUS_BUFFER_TYPES = {
-        STATUS_BUFFER_HEADER_RECV_STATUS: {
+        STATUS_BUFFER_COMMAND_ID_STATUS: {
             "read_len": 0x14,
             "write_len": 0x0C,
             "bitstruct": bitstruct.compile(
@@ -260,29 +364,17 @@ class InetboxApp:
                 ],
             ),
         },
-        STATUS_BUFFER_HEADER_WRITE_STATUS: {
-            "bitstruct": bitstruct.compile(
-                ">u16u8u8u16u16u16u8u8p16p16p8p16p8p8p8p8p8<",
-                names=[
-                    "target_temp_room",  # 2 bytes
-                    "heating_mode",  # 1 byte
-                    "_recv_status_u3",  # 1 byte
-                    "el_power_level",  # 2 bytes
-                    "target_temp_water",  # 2 bytes
-                    "el_power_level",  # 2 bytes
-                    "energy_mix",  # 1 byte
-                    "energy_mix",  # 1 byte
-                ],
-            ),
-        },
-        STATUS_BUFFER_HEADER_TIMER: {
+        STATUS_BUFFER_COMMAND_ID_TIMER: {
+            "id": 0x3D,  # when receiving, sending is that -1
+            "read_len": 0x18,
+            "write_len": 0x10,
             "bitstruct": bitstruct.compile(
                 ">u16u8u8u8u8u16u8u8u8u8u16u16u8u8u8u8u8u8u8u8<",
                 names=[
                     "timer_target_temp_room",
-                    "_timer_unknown2",
-                    "_timer_unknown3",
-                    "_timer_unknown4",
+                    "timer_heating_mode",
+                    "_timer_unknown1",
+                    "timer_el_power_level",
                     "_timer_unknown5",
                     "timer_target_temp_water",
                     "_timer_unknown6",
@@ -307,69 +399,29 @@ class InetboxApp:
                 ],
             ),
         },
-        # STATUS_BUFFER_HEADER_02: {
-        #    "bitstruct": bitstruct.compile(
-        #        ">u8p8p16p8p8p8p8p16p8p8p8p8p16p16p8p8p8p8p8p8p8p8<",
-        #        names=[
-        #            "_command_counter",
-        #        ],
-        #    ),
-        # },
-        STATUS_BUFFER_TIME: {
+        STATUS_BUFFER_COMMAND_ID_TIME: {
             # raw: 15 20 00 01 01 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00, 15/20 is the wall time
+            "id": 0x15,  # when receiving, sending is that -1
+            "read_len": 0x0A,
+            "write_len": 0x08,  # guessed
             "bitstruct": bitstruct.compile(
-                ">u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8<",
+                ">u8u8u8u8u8u8u8u8u8u8u<",
                 names=[
                     "wall_time_hours",
                     "wall_time_minutes",
                     "wall_time_seconds",
-                    "_time_unknown4",
-                    "_time_unknown5",
-                    "_time_unknown6",
-                    "_time_unknown7",
-                    "_time_unknown8",
-                    "_time_unknown9",
-                    "_time_unknown10",
-                    "_time_unknown11",
-                    "_time_unknown12",
-                    "_time_unknown13",
-                    "_time_unknown14",
-                    "_time_unknown15",
-                    "_time_unknown16",
-                    "_time_unknown17",
-                    "_time_unknown18",
-                    "_time_unknown19",
-                ],
-            )
-        },
-        STATUS_BUFFER_TIME_WRITE: {
-            # raw: 15 20 00 01 01 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00, 15/20 is the wall time
-            "bitstruct": bitstruct.compile(
-                ">u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8u8<",
-                names=[
-                    "wall_time_hours",
-                    "wall_time_minutes",
-                    "wall_time_seconds",
-                    "_time_unknown4",
-                    "_time_unknown5",
-                    "_time_unknown6",
-                    "_time_unknown7",
-                    "_time_unknown8",
-                    "_time_unknown9",
-                    "_time_unknown10",
-                    "_time_unknown11",
-                    "_time_unknown12",
-                    "_time_unknown13",
-                    "_time_unknown14",
-                    "_time_unknown15",
-                    "_time_unknown16",
-                    "_time_unknown17",
-                    "_time_unknown18",
-                    "_time_unknown19",
+                    "_time_display1",
+                    "_time_display2",
+                    "_time_display3",
+                    "clock_mode",
+                    "clock_source",
+                    "_time_display4",
+                    "_time_display5",
                 ],
             )
         },
     }
+    """
 
     STATUS_CONVERSION_FUNCTIONS = {  # pair for reading from buffer and writing to buffer, None if writing not allowed
         "target_temp_room": (
@@ -415,6 +467,8 @@ class InetboxApp:
         "wall_time_hours": (int, int),
         "wall_time_minutes": (int, int),
         "wall_time_seconds": (int, int),
+        "clock_mode": (cnv.clock_mode_to_string, cnv.string_to_clock_mode),
+        "clock_source": (cnv.clock_source_to_string, cnv.string_to_clock_source),
     }
 
     STATUS_HEADER_CHECKSUM_START = 8
@@ -533,7 +587,7 @@ class InetboxApp:
             return
 
         # after the preamble, there's a two-byte header defining the length and type of buffer
-        header = status_buffer[
+        header = (command_len, command_id) = status_buffer[
             len(self.STATUS_BUFFER_PREAMBLE) : len(self.STATUS_BUFFER_PREAMBLE) + 2
         ]
 
@@ -544,20 +598,20 @@ class InetboxApp:
         # todo: check the checksum
 
         # type 0d is special: it only updates the command counter
-        if header == self.STATUS_BUFFER_HEADER_02:
+        if command_id == self.STATUS_BUFFER_COMMAND_ID_COMMAND_COUNTER:
             self.log.info(f"Received command counter update, now: {command_counter}")
             self.status["_command_counter"] = command_counter
             return
 
         # get status buffer info for header
         try:
-            status_buffer_info = self.STATUS_BUFFER_TYPES[header]
+            command = self.COMMANDS[command_id]
         except KeyError:
             self.log.warning(f"Unknown status buffer type {header}")
             return
 
         # parse status buffer, starting after the header
-        parsed_status_buffer = status_buffer_info["bitstruct"].unpack(
+        parsed_status_buffer = command.parse(
             status_buffer[len(self.STATUS_BUFFER_PREAMBLE) + 4 :]
         )
 
@@ -573,10 +627,7 @@ class InetboxApp:
 
     def _get_status_buffer_for_writing(self):
         # right now, we only send this one type of buffer
-        status_buffer_header = self.STATUS_BUFFER_HEADER_WRITE_STATUS
-
-        # get status buffer info for header
-        status_buffer_info = self.STATUS_BUFFER_TYPES[status_buffer_header]
+        command = self.COMMAND_STATUS
 
         if not self.updates_to_send:
             self.log.debug("No updates to send.")
@@ -587,7 +638,7 @@ class InetboxApp:
 
         # get current status buffer contents as dict
         try:
-            binary_buffer_contents = status_buffer_info["bitstruct"].pack(
+            binary_buffer_contents = command.pack(
                 {**self.status, **self.updates_to_send}
             )
         except bitstruct.Error:
@@ -598,8 +649,9 @@ class InetboxApp:
         # calculate checksum
         checksum = calculate_checksum(
             self.STATUS_BUFFER_PREAMBLE[self.STATUS_HEADER_CHECKSUM_START :]
-            + status_buffer_header
-            + bytes([self.status["_command_counter"]])
+            + bytes(
+                [command.write_len, command.cid_write, self.status["_command_counter"]]
+            )
             + binary_buffer_contents
         )
 
@@ -607,8 +659,14 @@ class InetboxApp:
 
         output = (
             self.STATUS_BUFFER_PREAMBLE
-            + status_buffer_header
-            + bytes([self.status["_command_counter"], checksum])
+            + bytes(
+                [
+                    command.write_len,
+                    command.cid_write,
+                    self.status["_command_counter"],
+                    checksum,
+                ],
+            )
             + binary_buffer_contents
         )
         self.log.debug(f"Sending status buffer: {format_bytes(output)}")
@@ -623,9 +681,13 @@ class InetboxApp:
         if key.startswith("_"):
             return f"unknown - {self.status[key]} = {hex(self.status[key])}"
         if key not in self.STATUS_CONVERSION_FUNCTIONS:
-            raise Exception("Conversion function not defined - is this key defined?")
+            raise Exception(
+                f"Conversion function not defined - is this key ({key}) defined?"
+            )
         if self.STATUS_CONVERSION_FUNCTIONS[key][0] is None:
-            raise Exception("Conversion function not defined - is this key readable?")
+            raise Exception(
+                f"Conversion function not defined - is this key ({key}) readable?"
+            )
         return self.STATUS_CONVERSION_FUNCTIONS[key][0](self.status[key])
 
     def set_status(self, key, value):
@@ -635,9 +697,13 @@ class InetboxApp:
             self.updates_to_send[key] = value
             return
         if key not in self.STATUS_CONVERSION_FUNCTIONS:
-            raise Exception("Conversion function not defined - is this key defined?")
+            raise Exception(
+                f"Conversion function not defined - is this key ({key}) defined?"
+            )
         if self.STATUS_CONVERSION_FUNCTIONS[key][1] is None:
-            raise Exception("Conversion function not defined - is this key writable?")
+            raise Exception(
+                f"Conversion function not defined - is this key ({key}) writable?"
+            )
         self.log.debug(f"Setting {key} to {value}")
         self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value)
 

@@ -106,3 +106,31 @@ def string_to_heating_mode(string):
         return 10
     else:
         raise ValueError(f"Invalid heating mode: {string}")
+
+def clock_mode_to_string(clock_mode):
+    if clock_mode == 0:
+        return "24h"
+    elif clock_mode == 1:
+        return "12h"
+    else:
+        return f"UNKNOWN ({clock_mode})"
+    
+def string_to_clock_mode(string):
+    if string.startswith("24"):
+        return 0
+    else:
+        return 1
+    
+def clock_source_to_string(clock_source):
+    if clock_source == 0:
+        return "manual"
+    elif clock_source == 1:
+        return "inetbox"
+    else:
+        return f"UNKNOWN ({clock_source})"
+    
+def string_to_clock_source(string):
+    if string == "manual":
+        return 0
+    else:
+        return 1
