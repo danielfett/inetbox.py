@@ -32,7 +32,7 @@ class InetboxLINProtocol:
             # This request is probably a heartbeat request or similar.
             # Expected answer is just a 0x00 byte.
             # We here add all frames that will be sent to the response buffer.
-            self.log.info("Received heartbeat request.")
+            self.log.debug("Received heartbeat request.")
             lin.prepare_transportlayer_response(
                 [bytes([self.NODE_ADDRESS, 0x02, 0xF9, 0x00, 0xFF, 0xFF, 0xFF, 0xFF])]
             )
@@ -41,7 +41,7 @@ class InetboxLINProtocol:
             and sid == 0xB0
             and payload.startswith(self.IDENTIFIER)
         ):
-            self.log.info("Received request to assign network address.")
+            self.log.debug("Received request to assign network address.")
             # Assign NAD request - has to be answered, empty payload
             if payload[-1] != self.NODE_ADDRESS:
                 raise Exception(
@@ -106,12 +106,12 @@ class InetboxLINProtocol:
             self.app.process_status_buffer_update(request_payload)
 
         elif sid == 0xBA:
-            self.log.info("Received request for data upload: %s", request_payload)
+            self.log.debug("Received request for data upload: %s", request_payload)
 
             send_buffer = self.app._get_status_buffer_for_writing()
 
             if send_buffer is None:
-                self.log.info("Not responding, waiting for status message first!")
+                self.log.debug("Not responding, waiting for status message first!")
                 return
 
             lin.prepare_transportlayer_response(
@@ -131,13 +131,13 @@ class InetboxLINProtocol:
             self.log.info("Uploading new status data.")
 
     def receive_read_by_identifier_request(self, lin: Lin):
-        self.log.info("Received read by identifier request.")
+        self.log.debug("Received read by identifier request.")
         lin.prepare_transportlayer_response(
             [bytes([self.NODE_ADDRESS, 0x06, 0xF2]) + self.IDENTIFIER + bytes([0x00])]
         )
 
     def answer_to_d8_message(self):
-        self.log.info(
+        self.log.debug(
             f"Responding to 08 message (updates_to_send={self.app.updates_to_send})!"
         )
         return bytes(
@@ -508,7 +508,7 @@ class InetboxApp:
         status_buffer_info = self.STATUS_BUFFER_TYPES[status_buffer_header]
 
         if not self.updates_to_send:
-            self.log.info("No updates to send.")
+            self.log.debug("No updates to send.")
             return None
 
         # increase output message counter
@@ -557,14 +557,14 @@ class InetboxApp:
     def set_status(self, key, value):
         # set the respective key in self.status, if it exists, and apply the conversion function
         if key.startswith("_"):
-            self.log.info(f"Setting unknown {key} to {value}")
+            self.log.debug(f"Setting unknown {key} to {value}")
             self.updates_to_send[key] = value
             return
         if key not in self.STATUS_CONVERSION_FUNCTIONS:
             raise Exception("Conversion function not defined - is this key defined?")
         if self.STATUS_CONVERSION_FUNCTIONS[key][1] is None:
             raise Exception("Conversion function not defined - is this key writable?")
-        self.log.info(f"Setting {key} to {value}")
+        self.log.debug(f"Setting {key} to {value}")
         self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value)
         
     def get_all(self):
