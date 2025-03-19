@@ -110,7 +110,10 @@ class TrumaService(miqro.Service):
             # Implement automatism to set the heating mode to "eco" if it is off when a temperature > 5°C is set.
             if target_temp >= self.TRUMA_MIN_TEMP:  # If it is desired to heat the room
                 if (
-                    self.updates_buffer.get("heating_mode", "off") == "off"
+                    "heating_mode" in self.updates_buffer
+                    and self.updates_buffer["heating_mode"] == "off"
+                ) or (
+                    "heating_mode" not in self.updates_buffer
                     and self.inetapp.get_status("heating_mode", "off") == "off"
                 ):
                     self.updates_buffer["heating_mode"] = (
@@ -145,8 +148,11 @@ class TrumaService(miqro.Service):
             # If the heating mode is set to "eco" or "boost", set the target temperature to 18°C.
             elif msg in ["eco", "boost"]:
                 if (
-                    int(self.updates_buffer.get("target_temp_room", "0"))
+                    "target_temp_room" in self.updates_buffer
+                    and int(self.updates_buffer["target_temp_room"])
                     < self.TRUMA_MIN_TEMP
+                ) or (
+                    "target_temp_room" not in self.updates_buffer
                     and int(self.inetapp.get_status("target_temp_room", "0"))
                     < self.TRUMA_MIN_TEMP
                 ):
