@@ -6,6 +6,7 @@ from .tools import format_bytes, calculate_checksum
 from . import conversions as cnv
 import bitstruct
 from dataclasses import dataclass
+from typing import List, Tuple
 
 
 class InetboxLINProtocol:
@@ -165,18 +166,42 @@ class InetboxLINProtocol:
     ANSWER_TO_PIDS = {0x18: answer_to_d8_message}
 
 
-@dataclass
 class TrumaCommand:
     cid: int
-    read_len: int
+    bitstruct_read: bitstruct.CompiledFormat
+    bitstruct_write: bitstruct.CompiledFormat
+    attributes_rw: List[str]
+    attributes_r: List[str]
     write_len: int
-    bitstruct: bitstruct.CompiledFormat
+    read_len: int
+
+    def __init__(
+        self,
+        cid,
+        data_elements_rw: List[Tuple[str, str]],
+        data_elements_r: List[Tuple[str, str]] = [],
+    ):
+        self.cid = cid
+        self.attributes_rw = [t[0] for t in data_elements_rw]
+        self.attributes_r = [t[0] for t in data_elements_r]
+
+        self.bitstruct_read = bitstruct.compile(
+            ">" + "".join([t[1] for t in data_elements_rw + data_elements_r]) + "<",
+            names=self.attributes_rw + self.attributes_r,
+        )
+        self.read_len = self.bitstruct_read.calcsize() // 8
+
+        self.bitstruct_write = bitstruct.compile(
+            ">" + "".join([t[1] for t in data_elements_rw]) + "<",
+            names=self.attributes_rw,
+        )
+        self.write_len = self.bitstruct_write.calcsize() // 8
 
     def parse(self, byte_data):
-        return self.bitstruct.unpack(byte_data)
+        return self.bitstruct_read.unpack(byte_data)
 
     def pack(self, data):
-        return self.bitstruct.pack(data)[: self.write_len]
+        return self.bitstruct_write.pack(data)
 
     @property
     def cid_write(self):
@@ -249,84 +274,71 @@ class InetboxApp:
     )
 
     COMMAND_STATUS = TrumaCommand(
-        cid=0x33,  # when receiving, sending is that -1
-        read_len=0x14,
-        write_len=0x0C,
-        bitstruct=bitstruct.compile(
-            ">u16u8u8u16u16u16u8u8u16u16u8r16u8<",
-            names=[
-                "target_temp_room",
-                "heating_mode",
-                "_recv_status_u3",
-                "el_power_level",
-                "target_temp_water",
-                "el_power_level",
-                "energy_mix",
-                "energy_mix",
-                "current_temp_water",
-                "current_temp_room",
-                "operating_status",
-                "error_code",
-                "_recv_status_u10",
-            ],
-        ),
+        0x33,  # when receiving, sending is that -1
+        [
+            ("target_temp_room", "u16"),  # 0x00, 0x01
+            ("heating_mode", "u8"),  # 0x02
+            ("_recv_status_u3", "u8"),  # 0x03
+            ("el_power_level", "u16"),  # 0x04, 0x05
+            ("target_temp_water", "u16"),  # 0x06, 0x07
+            ("el_power_level", "u16"),  # 0x08, 0x09
+            ("energy_mix", "u8"),  # 0x0A
+            ("energy_mix", "u8"),  # 0x0B
+        ],
+        [
+            ("current_temp_water", "u16"),  # 0x0C, 0x0D
+            ("current_temp_room", "u16"),  # 0x0E, 0x0F
+            ("operating_status", "u8"),  # 0x10
+            ("error_code", "r16"),  # 0x11
+            ("_recv_status_u10", "u8"),  # 0x12
+        ],
     )
 
     COMMAND_TIMER = TrumaCommand(
-        cid=0x3D,
-        read_len=0x18,
-        write_len=0x10,
-        bitstruct=bitstruct.compile(
-            ">u16u8u8u8u8u16u8u8u8u8u16u16u8u8u8u8u8u8u8u8<",
-            names=[
-                "timer_target_temp_room",
-                "timer_heating_mode",
-                "_timer_unknown1",
-                "timer_el_power_level",
-                "_timer_unknown5",
-                "timer_target_temp_water",
-                "_timer_unknown6",
-                "_timer_unknown7",
-                "_timer_unknown8",
-                "_timer_unknown9",
-                "_timer_unknown10",
-                "_timer_unknown11",
-                "_timer_unknown10",
-                "_timer_unknown11",
-                "_timer_unknown12",
-                "_timer_unknown13",
-                "_timer_unknown14",
-                "_timer_unknown15",
-                "_timer_unknown16",
-                "_timer_unknown17",
-                "timer_active",
-                "timer_start_minutes",
-                "timer_start_hours",
-                "timer_stop_minutes",
-                "timer_stop_hours",
-            ],
-        ),
+        0x3D,
+        [
+            ("timer_target_temp_room", "u16"),
+            ("timer_heating_mode", "u8"),
+            ("_timer_unknown1", "u8"),
+            ("timer_el_power_level", "u8"),
+            ("_timer_unknown5", "u8"),
+            ("timer_target_temp_water", "u16"),
+            ("_timer_unknown6", "u8"),
+            ("_timer_unknown7", "u8"),
+            ("_timer_unknown8", "u8"),
+            ("_timer_unknown9", "u8"),
+            ("_timer_unknown10", "u8"),
+            ("_timer_unknown11", "u8"),
+            ("_timer_unknown10", "u8"),
+            ("_timer_unknown11", "u8"),
+            ("_timer_unknown12", "u8"),
+            ("_timer_unknown13", "u8"),
+            ("_timer_unknown14", "u8"),
+            ("_timer_unknown15", "u8"),
+            ("_timer_unknown16", "u8"),
+            ("_timer_unknown17", "u8"),
+            ("timer_active", "u8"),
+            ("timer_start_minutes", "u8"),
+            ("timer_start_hours", "u8"),
+            ("timer_stop_minutes", "u8"),
+            ("timer_stop_hours", "u8"),
+        ],
     )
 
     COMMAND_TIME = TrumaCommand(
-        cid=0x15,
-        read_len=0x0A,
-        write_len=0x08,
-        bitstruct=bitstruct.compile(
-            ">u8u8u8u8u8u8u8u8u8u8<",
-            names=[
-                "wall_time_hours",
-                "wall_time_minutes",
-                "wall_time_seconds",
-                "_time_display1",
-                "_time_display2",
-                "_time_display3",
-                "clock_mode",
-                "clock_source",
-                "_time_display4",
-                "_time_display5",
-            ],
-        ),
+        0x15,
+        [
+            ("wall_time_hours", "u8"),
+            ("wall_time_minutes", "u8"),
+            ("wall_time_seconds", "u8"),
+            ("_time_display1", "u8"),
+            ("_time_display2", "u8"),
+            ("_time_display3", "u8"),
+            ("clock_mode", "u8"),
+            ("clock_source", "u8"),
+            ("_time_display4", "u8"),
+            ("_time_display5", "u8"),
+        ],
     )
 
     COMMANDS = {
@@ -336,92 +348,6 @@ class InetboxApp:
     }
 
     STATUS_BUFFER_COMMAND_ID_COMMAND_COUNTER = 0x0D
-    """"
-    "STATUS_BUFFER_COMMAND_ID_STATUS = 0x33
-    STATUS_BUFFER_COMMAND_ID_TIMER = 0x3D  # when receiving, sending is that -1
-    STATUS_BUFFER_COMMAND_ID_TIME = 0x15  # when receiving, sending is that -1
-
-    STATUS_BUFFER_TYPES = {
-        STATUS_BUFFER_COMMAND_ID_STATUS: {
-            "read_len": 0x14,
-            "write_len": 0x0C,
-            "bitstruct": bitstruct.compile(
-                ">u16u8u8u16u16u16u8u8u16u16u8r16u8<",
-                names=[
-                    "target_temp_room",
-                    "heating_mode",
-                    "_recv_status_u3",
-                    "el_power_level",
-                    "target_temp_water",
-                    "el_power_level",  # appears twice, we assume that it is the same
-                    "energy_mix",
-                    "energy_mix",  # appears twice, we assume that it is the same
-                    "current_temp_water",
-                    "current_temp_room",
-                    "operating_status",
-                    "error_code",
-                    "_recv_status_u10",
-                ],
-            ),
-        },
-        STATUS_BUFFER_COMMAND_ID_TIMER: {
-            "id": 0x3D,  # when receiving, sending is that -1
-            "read_len": 0x18,
-            "write_len": 0x10,
-            "bitstruct": bitstruct.compile(
-                ">u16u8u8u8u8u16u8u8u8u8u16u16u8u8u8u8u8u8u8u8<",
-                names=[
-                    "timer_target_temp_room",
-                    "timer_heating_mode",
-                    "_timer_unknown1",
-                    "timer_el_power_level",
-                    "_timer_unknown5",
-                    "timer_target_temp_water",
-                    "_timer_unknown6",
-                    "_timer_unknown7",
-                    "_timer_unknown8",
-                    "_timer_unknown9",
-                    "_timer_unknown10",
-                    "_timer_unknown11",
-                    "_timer_unknown10",
-                    "_timer_unknown11",
-                    "_timer_unknown12",
-                    "_timer_unknown13",
-                    "_timer_unknown14",
-                    "_timer_unknown15",
-                    "_timer_unknown16",
-                    "_timer_unknown17",
-                    "timer_active",
-                    "timer_start_minutes",
-                    "timer_start_hours",
-                    "timer_stop_minutes",
-                    "timer_stop_hours",
-                ],
-            ),
-        },
-        STATUS_BUFFER_COMMAND_ID_TIME: {
-            # raw: 15 20 00 01 01 00 00 01 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00 00, 15/20 is the wall time
-            "id": 0x15,  # when receiving, sending is that -1
-            "read_len": 0x0A,
-            "write_len": 0x08,  # guessed
-            "bitstruct": bitstruct.compile(
-                ">u8u8u8u8u8u8u8u8u8u8u<",
-                names=[
-                    "wall_time_hours",
-                    "wall_time_minutes",
-                    "wall_time_seconds",
-                    "_time_display1",
-                    "_time_display2",
-                    "_time_display3",
-                    "clock_mode",
-                    "clock_source",
-                    "_time_display4",
-                    "_time_display5",
-                ],
-            )
-        },
-    }
-    """
 
     STATUS_CONVERSION_FUNCTIONS = {  # pair for reading from buffer and writing to buffer, None if writing not allowed
         "target_temp_room": (
@@ -625,12 +551,22 @@ class InetboxApp:
             f"Received status buffer update for {header}: {parsed_status_buffer}"
         )
 
-    def _get_status_buffer_for_writing(self):
-        # right now, we only send this one type of buffer
-        command = self.COMMAND_STATUS
+    def _find_command_with_updates(self):
+        for command in self.COMMANDS.values():
+            if any(
+                key in self.updates_to_send
+                for key in command.attributes_rw
+                if not key.startswith("_")
+            ):
+                return command
+        return None
 
-        if not self.updates_to_send:
+    def _get_status_buffer_for_writing(self):
+        command = self._find_command_with_updates()
+
+        if command is None:
             self.log.debug("No updates to send.")
+            self.updates_to_send = {}
             return None
 
         # increase output message counter
@@ -655,7 +591,10 @@ class InetboxApp:
             + binary_buffer_contents
         )
 
-        self.updates_to_send = {}
+        # remove those elements from updates_to_send that have now been sent
+        for key in command.attributes_rw:
+            if key in self.updates_to_send:
+                del self.updates_to_send[key]
 
         output = (
             self.STATUS_BUFFER_PREAMBLE
