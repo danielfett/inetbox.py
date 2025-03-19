@@ -59,14 +59,18 @@ There is also a systemd service to run the script at every startup. The details 
 ## Adding /home/pi/.local/bin to your PATH
 
 At the end of the above-described installation, you might get the following warning:
-```Installing collected packages: PyYAML, paho-mqtt, pyserial, miqro, bitstruct, inetbox-py
+
+```
+  Installing collected packages: PyYAML, paho-mqtt, pyserial, miqro, bitstruct, inetbox-py
   WARNING: The scripts pyserial-miniterm and pyserial-ports are installed in '/home/pi/.local/bin' which is not on PATH.
   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
   WARNING: The script truma_service is installed in '/home/pi/.local/bin' which is not on PATH.
   Consider adding this directory to PATH or, if you prefer to suppress this warning, use --no-warn-script-location.
 ```
+
 Then add `/home/pi/.local/bin` to your PATH (e.g., at the end of `~/.bashrc`) using the following commands. The first one adds `export PATH="$HOME/.local/bin:$PATH"` to the logged in user's `.bashrc`, and the second command reloads the `.bashrc` settings without the need to relogin:
-```
+
+```bash
 echo 'export PATH="$HOME/.local/bin:$PATH"' >> ~/.bashrc
 . ~/.bashrc
 ```
@@ -90,6 +94,7 @@ log_level: INFO
 services: {}
 
 ```
+
 If you need to configure MQTT authentication and/or TLS settings, follow [these](https://github.com/danielfett/miqro#authentication-and-tls) instructions.
 
 
@@ -103,7 +108,8 @@ services:
 ```
 
 To run the service:
-```
+
+```bash
 truma_service
 ```
 
@@ -145,7 +151,6 @@ Important: Enabling all log options will result in a lot of output. Make sure to
 You can also specify debug settings in the `miqro.yml` file:
 
 ```yaml
-
 services:
   truma:
     log_dir: /var/log/truma
@@ -185,7 +190,7 @@ mosquitto_pub -t 'service/truma/set/target_temp_room' -m '10'; mosquitto_pub -t 
 
 There are some specifics for certain settings:
 
- * `target_temp_room` and `heating_mode` must both be enabled for the heating to work. It's best to set both together as in the example above.
+ * `target_temp_room` and `heating_mode` must both be enabled for the heating to work. It's best to set both together as in the example above. If you set one without the other, a default for the other will be applied - this is configurable, see settings below.
  * `target_temp_room` can be set to 0 to turn off the heating, and 5-30 degrees otherwise.
  * `heating_mode` can be set to `off`, `eco` and `high` and defines the fan intensity for room heating.
  * `target_temp_water` must be set to one of `0` (off), `40` (equivalent to selecting 'eco' on the display), `60` ('high'), or `200` (boost)
@@ -193,7 +198,7 @@ There are some specifics for certain settings:
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
 
-Note: Since some settings only work together, like `target_temp_room` and `heating_mode`, the service does not apply changes immediately. Instead, changed settings are collected and only applied after a wait time of about a seconds. To change this time, set the `updates_buffer_time` setting in the `miqro.yml` file to the desired wait time in seconds.
+Note: Since some settings only work together, like `target_temp_room` and `heating_mode`, the service does not apply changes immediately. Instead, changed settings are collected and only applied after a wait time of about a second. To change this time, set the `updates_buffer_time` setting in the `miqro.yml` file to the desired wait time in seconds (see settings below).
 
 The topic `service/truma/update_status` gives information about the status of the pushed setting changes:
 
@@ -206,6 +211,21 @@ The topic `service/truma/cp_plus_status` gives information about the connection 
 
  * `online` means that the service is connected to CP Plus and is receiving status updates.
  * `waiting` means that the service is not connected to CP Plus and is not receiving status updates. This can happen after a restart of the service. When you send a settings change command, the `update_status` will be `waiting_for_cp_plus` until the service is connected. 
+
+### Settings
+
+The following service-specific settings can be used in the `miqro.yml` file besides the [general miqro settings](https://github.com/danielfett/miqro?tab=readme-ov-file#configuration-file):
+
+- `default_target_temp_room` (default: 5) - The default target room temperature to set when the heating is enabled, but no target temperature is set.
+- `default_heating_mode` (default: 'eco') - The default heating mode to set when the target temperature is set to a value greater than 5°C, but no heating mode is set.
+- `updates_buffer_time` (default: 1) - The time in seconds to wait for more setting changes before applying them. This is useful when multiple settings need to be changed together.
+- `serial_device` (default: `/dev/serial0`) - The serial device to use for the LIN connection. This can be set to `/dev/ttyS0` or `/dev/ttyAMA0` for the Raspberry Pi 3 and 4, respectively.
+- `baudrate` (default: 9600) - The baudrate to use for the LIN connection. This should not be changed unless you know what you are doing.
+- `timeout` (default: 0.03) - The timeout in seconds for reading from the LIN bus. This should not be changed unless you know what you are doing.
+- `log_dir` (default: None) - The directory to write log files to. If not set, logs are written to stdout.
+- `debug_app` (default: False) - Enable debugging for the application layer.
+- `debug_lin` (default: False) - Enable debugging for the LIN layer.
+- `debug_protocol` (default: False) - Enable debugging for the protocol layer.
 
 ### Installing the Systemd Service
 

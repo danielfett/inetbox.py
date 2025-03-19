@@ -542,9 +542,11 @@ class InetboxApp:
             self.STATUS_BUFFER_PREAMBLE + status_buffer_header + binary_buffer_contents
         )
 
-    def get_status(self, key):
+    def get_status(self, key, default=None):
         # return the respective key from self.status, if it exists, and apply the conversion function
         if key not in self.status:
+            if default is not None:
+                return default
             raise KeyError
         if key.startswith("_"):
             return f"unknown - {self.status[key]} = {hex(self.status[key])}"
