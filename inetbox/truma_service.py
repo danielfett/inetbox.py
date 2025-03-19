@@ -108,20 +108,24 @@ class TrumaService(miqro.Service):
                 return
 
             # Implement automatism to set the heating mode to "eco" if it is off when a temperature > 5°C is set.
-            if (
-                target_temp >= self.TRUMA_MIN_TEMP  # If it is desired to heat the room
-                and (  # ... and there is no status change to enable the heating
+            if target_temp >= self.TRUMA_MIN_TEMP:  # If it is desired to heat the room
+                if (
                     self.updates_buffer.get("heating_mode", "off") == "off"
-                )
-                and self.inetapp.get_status("heating_mode", "off") == "off"
-            ):
-                self.updates_buffer["heating_mode"] = self.truma_default_heating_mode
-                self.log.info(
-                    "Setting heating mode to 'eco' as a temperature > 5°C was set"
-                )
+                    and self.inetapp.get_status("heating_mode", "off") == "off"
+                ):
+                    self.updates_buffer["heating_mode"] = (
+                        self.truma_default_heating_mode
+                    )
+                    self.log.info(
+                        "Setting heating mode to 'eco' as a temperature > 5°C was set"
+                    )
+                else:
+                    self.log.info(
+                        "Heating mode is already set to 'eco' or 'boost', no change necessary"
+                    )
 
             # The other way round: If the target temperature is set to lower than 5°C, turn off the heating.
-            if target_temp < self.TRUMA_MIN_TEMP:
+            else:
                 self.updates_buffer["heating_mode"] = "off"
                 self.updates_buffer["target_temp_room"] = (
                     "0"  # Truma cannot heat below 5°C
@@ -138,18 +142,27 @@ class TrumaService(miqro.Service):
                 self.log.info(
                     "Setting target temperature to 0°C as heating was turned off"
                 )
-
             # If the heating mode is set to "eco" or "boost", set the target temperature to 18°C.
-            if (
-                msg in ["eco", "boost"]
-                and int(self.updates_buffer.get("target_temp_room", "0"))
-                < self.TRUMA_MIN_TEMP
-                and int(self.inetapp.get_status("target_temp_room", "0"))
-                < self.TRUMA_MIN_TEMP
-            ):
-                self.updates_buffer["target_temp_room"] = str(self.truma_default_target_temp_room)
-                self.log.info(
-                    "Setting target temperature to the default temperature as heating mode was set to 'eco' or 'boost'"
+            elif msg in ["eco", "boost"]:
+                if (
+                    int(self.updates_buffer.get("target_temp_room", "0"))
+                    < self.TRUMA_MIN_TEMP
+                    and int(self.inetapp.get_status("target_temp_room", "0"))
+                    < self.TRUMA_MIN_TEMP
+                ):
+                    self.updates_buffer["target_temp_room"] = str(
+                        self.truma_default_target_temp_room
+                    )
+                    self.log.info(
+                        "Setting target temperature to the default temperature as heating mode was set to 'eco' or 'boost'"
+                    )
+                else:
+                    self.log.info(
+                        "Target temperature is already set to a value > 5°C, no change necessary"
+                    )
+            else:
+                self.log.error(
+                    f"Invalid heating mode value {msg}. Only 'off', 'eco' and 'boost' are allowed."
                 )
 
         if not self.inetapp.can_send_updates:
