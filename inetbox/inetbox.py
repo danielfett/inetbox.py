@@ -87,7 +87,7 @@ class InetboxLINProtocol:
                 )
                 self.transportlayer_received_request_payload = None
         else:
-            # self.log.warning("No idea how to answer this message.")
+            self.log.warning(f"No idea how to answer this message: frame_type={frame_type} sid={sid:x} payload={payload}")
             pass
 
     def _complete_transportlayer_request(self, lin: Lin, sid, request_payload):
