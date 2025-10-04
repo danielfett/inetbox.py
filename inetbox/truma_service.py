@@ -16,6 +16,7 @@ class TrumaService(miqro.Service):
     TRUMA_MIN_TEMP = 5
     TRUMA_DEFAULT_TEMP = 5
     TRUMA_DEFAULT_MODE = "eco"
+    TRUMA_MAX_TIMEDELTA = timedelta(minutes=1)
 
     updates_buffer = {}
     last_update_buffer_change = None
@@ -267,6 +268,7 @@ class TrumaService(miqro.Service):
 
     def set_time(self):
         current_time = datetime.now()
+
         if not self.service_config.get("timezone_override", None):
             self.log.info(
                 f"Setting time to {current_time} (no timezone override configured in settings)"
@@ -277,10 +279,19 @@ class TrumaService(miqro.Service):
             self.log.info(
                 f"Setting time to {current_time} (timezone override activated in settings)"
             )
+        # only set the time when the currently set time deviates more than a minute
+        current_hours = int(current_time.hour)
+        current_minutes = int(current_time.minute)
+        current_seconds = int(current_time.second)
+        if abs(current_hours - int(self.inetapp.get_status("wall_time_hours", current_hours))) > self.TRUMA_MAX_TIMEDELTA.seconds/3600 or \
+           abs(current_minutes - int(self.inetapp.get_status("wall_time_minutes", current_minutes))) > self.TRUMA_MAX_TIMEDELTA.seconds/60 or \
+           abs(current_seconds - int(self.inetapp.get_status("wall_time_seconds", current_seconds))) > self.TRUMA_MAX_TIMEDELTA.seconds:
 
-        self.inetapp.set_status("wall_time_hours", str(current_time.hour))
-        self.inetapp.set_status("wall_time_minutes", str(current_time.minute))
-        self.inetapp.set_status("wall_time_seconds", str(current_time.second))
+            self.inetapp.set_status("wall_time_hours", str(current_hours))
+            self.inetapp.set_status("wall_time_minutes", str(current_minutes))
+            self.inetapp.set_status("wall_time_seconds", str(current_seconds))
+        else:
+            self.log.info("Time is already up to date, no need to set it")
 
 
 def run():
