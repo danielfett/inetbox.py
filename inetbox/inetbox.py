@@ -5,7 +5,6 @@ from .lin import Lin
 from .tools import format_bytes, calculate_checksum
 from . import conversions as cnv
 import bitstruct
-from dataclasses import dataclass
 from typing import List, Tuple
 
 
@@ -174,6 +173,8 @@ class TrumaCommand:
     attributes_r: List[str]
     write_len: int
     read_len: int
+    can_send_updates: bool = False
+    updates_pending: bool = False
 
     def __init__(
         self,
@@ -198,11 +199,22 @@ class TrumaCommand:
         self.write_len = self.bitstruct_write.calcsize() // 8
 
     def parse(self, byte_data):
+        self.can_send_updates = True
+        self.updates_pending = False
         return self.bitstruct_read.unpack(byte_data)
 
     def pack(self, data):
-        return self.bitstruct_write.pack(data)
-
+        if not self.can_send_updates:
+            return None
+        
+        self.updates_pending = True
+        try:
+            return self.bitstruct_write.pack(data)
+        except bitstruct.Error:
+            # not all required data in status buffer yet
+            self.can_send_updates = False
+            return None
+        
     @property
     def cid_write(self):
         return self.cid - 1
@@ -405,8 +417,6 @@ class InetboxApp:
 
     updates_to_send = {}
 
-    can_send_updates = False
-
     display_status = {}
 
     def __init__(self, debug):
@@ -543,11 +553,10 @@ class InetboxApp:
 
         # if any of the values is new, set self.status_updated to True, ignore underscore keys
         self.status_updated = True
-        self.can_send_updates = True
         self.status.update(parsed_status_buffer)
 
         # log
-        self.log.info(
+        self.log.debug(
             f"Received status buffer update for {header}: {parsed_status_buffer}"
         )
 
@@ -573,13 +582,11 @@ class InetboxApp:
         self.status["_command_counter"] = (self.status["_command_counter"] + 1) % 0xFF
 
         # get current status buffer contents as dict
-        try:
-            binary_buffer_contents = command.pack(
-                {**self.status, **self.updates_to_send}
-            )
-        except bitstruct.Error:
-            # not all required data in status buffer yet
-            self.can_send_updates = False
+        binary_buffer_contents = command.pack(
+            {**self.status, **self.updates_to_send}
+        )
+        if binary_buffer_contents is None:
+            self.log.debug("Not all required data in status buffer yet.")
             return None
 
         # calculate checksum
@@ -649,3 +656,9 @@ class InetboxApp:
     def get_all(self):
         self.status_updated = False
         return {key: self.get_status(key) for key in self.status}
+
+    def updates_pending(self):
+        return any(c.updates_pending for c in self.COMMANDS.values())
+
+    def can_send_updates(self):
+        return all(c.can_send_updates for c in self.COMMANDS.values())

@@ -5,6 +5,7 @@ from os import environ
 from datetime import timedelta, datetime
 import logging
 import logging.handlers
+from dateutil.tz import gettz
 
 
 class TrumaService(miqro.Service):
@@ -138,7 +139,7 @@ class TrumaService(miqro.Service):
                 )
 
         # Similar for heating mode
-        if topic == "heating_mode":
+        elif topic == "heating_mode":
             # And if the heating mode is turned off, set the target temperature to 0°C.
             if msg == "off":
                 self.updates_buffer["target_temp_room"] = "0"
@@ -171,6 +172,38 @@ class TrumaService(miqro.Service):
                     f"Invalid heating mode value {msg}. Only 'off', 'eco' and 'boost' are allowed."
                 )
 
+        # parse date/time for clock setting
+        elif topic == "wall_time":
+            try:
+                hours, minutes, seconds = msg.split(":")
+            except ValueError:
+                self.log.error("Invalid time format (expected HH:MM:SS format)")
+                return
+
+            if not hours.isdigit() or not minutes.isdigit() or not seconds.isdigit():
+                self.log.error(
+                    "Invalid time format (expected HH:MM:SS format) - non-numeric values found"
+                )
+                return
+
+            if (
+                int(hours) > 23
+                or int(hours) < 0
+                or int(minutes) > 59
+                or int(minutes) < 0
+                or int(seconds) > 59
+                or int(seconds) < 0
+            ):
+                self.log.error(
+                    "Invalid time format (expected HH:MM:SS format) - values out of range"
+                )
+                return
+
+            del self.updates_buffer[topic]
+            self.updates_buffer["wall_time_hours"] = hours
+            self.updates_buffer["wall_time_minutes"] = minutes
+            self.updates_buffer["wall_time_seconds"] = seconds
+
         if not self.inetapp.can_send_updates:
             msg = "Cannot send updates to inetapp, no status received from CP Plus yet. Changes will be delayed until status received."
             self.log.error(msg)
@@ -181,8 +214,6 @@ class TrumaService(miqro.Service):
         if self.last_update_buffer_change is None:
             return
         if datetime.now() - self.last_update_buffer_change < self.updates_buffer_time:
-            return
-        if not self.inetapp.can_send_updates:
             return
 
         self.log.info(f"Committing updates {self.updates_buffer}")
@@ -197,20 +228,22 @@ class TrumaService(miqro.Service):
         self.updates_buffer = {}
         self.last_update_buffer_change = None
 
-    @miqro.loop(seconds=0.1)
+    @miqro.loop(seconds=0.3)
     def send_update_status(self):
         if self.last_update_buffer_change is not None:
-            if not self.inetapp.can_send_updates:
+            if not self.inetapp.can_send_updates():
                 status = "waiting_for_cp_plus"
             else:
                 status = "waiting_commit"
         elif self.inetapp.updates_to_send:
             status = "waiting_truma"
+        elif self.inetapp.updates_pending():
+            status = "waiting_truma"
         else:
             status = "idle"
         self.publish("update_status", status, only_if_changed=timedelta(seconds=60))
 
-    @miqro.loop(seconds=0.1)
+    @miqro.loop(seconds=0.3)
     def send_cp_plus_status(self):
         if self.inetapp.can_send_updates:
             status = "online"
@@ -218,6 +251,36 @@ class TrumaService(miqro.Service):
             status = "waiting"
 
         self.publish("cp_plus_status", status, only_if_changed=timedelta(seconds=60))
+
+    @miqro.handle("update_time")
+    def handle_update_time(self, msg):
+        self.set_time()
+
+    @miqro.loop(hours=24)
+    def set_time_24hour(self):
+        if not self.service_config.get("set_time", False):
+            return
+        if not self.inetapp.COMMAND_TIME.can_send_updates:
+            return
+
+        self.set_time()
+
+    def set_time(self):
+        current_time = datetime.now()
+        if not self.service_config.get("timezone_override", None):
+            self.log.info(
+                f"Setting time to {current_time} (no timezone override configured in settings)"
+            )
+        else:
+            tz = gettz(self.service_config["timezone_override"])
+            current_time = current_time.astimezone(tz)
+            self.log.info(
+                f"Setting time to {current_time} (timezone override activated in settings)"
+            )
+
+        self.inetapp.set_status("wall_time_hours", str(current_time.hour))
+        self.inetapp.set_status("wall_time_minutes", str(current_time.minute))
+        self.inetapp.set_status("wall_time_seconds", str(current_time.second))
 
 
 def run():

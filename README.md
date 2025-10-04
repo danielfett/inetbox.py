@@ -212,13 +212,25 @@ The topic `service/truma/cp_plus_status` gives information about the connection 
  * `online` means that the service is connected to CP Plus and is receiving status updates.
  * `waiting` means that the service is not connected to CP Plus and is not receiving status updates. This can happen after a restart of the service. When you send a settings change command, the `update_status` will be `waiting_for_cp_plus` until the service is connected. 
 
-### Settings
+### Setting the Clock
+
+There are three ways to update the clock on the Truma panel:
+
+- **Manually:** To set the clock manually, use the topics `service/truma/set/wall_time_hours`, `service/truma/set/wall_time_minutes`, and `service/truma/set/wall_time_seconds`. You can also send a message to `service/truma/set/wall_time` with the time in the format `HH:MM:SS`.
+- **Automatically, externally triggered:** Send any message to `service/truma/update_time` to update the time on the Truma panel to the current system time of the platform running the service. If needed, the timezone can be overridden by using the setting `timezone_override` in the service settings to a valid timezone name (e.g., `Europe/Berlin`).
+- **Automatically, every 24 hours:** Set the setting `set_time` to `true` in the service settings to update the time on the Truma panel to the current system time every 24 hours.
+
+Alternatively, you can 
+
+### Service Settings
 
 The following service-specific settings can be used in the `miqro.yml` file besides the [general miqro settings](https://github.com/danielfett/miqro?tab=readme-ov-file#configuration-file):
 
 - `default_target_temp_room` (default: 5) - The default target room temperature to set when the heating is enabled, but no target temperature is set.
 - `default_heating_mode` (default: 'eco') - The default heating mode to set when the target temperature is set to a value greater than 5°C, but no heating mode is set.
 - `updates_buffer_time` (default: 1) - The time in seconds to wait for more setting changes before applying them. This is useful when multiple settings need to be changed together.
+- `set_time` (default: False) - Automatically set the time on the Truma panel to the current system time every 24 hours.
+- `timezone_override` (default: None) - The timezone to use for setting the time on the Truma panel. If not set, the system timezone is used.
 - `serial_device` (default: `/dev/serial0`) - The serial device to use for the LIN connection. This can be set to `/dev/ttyS0` or `/dev/ttyAMA0` for the Raspberry Pi 3 and 4, respectively.
 - `baudrate` (default: 9600) - The baudrate to use for the LIN connection. This should not be changed unless you know what you are doing.
 - `timeout` (default: 0.03) - The timeout in seconds for reading from the LIN bus. This should not be changed unless you know what you are doing.

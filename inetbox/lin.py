@@ -21,7 +21,7 @@ class Lin:
     SID_READ_BY_IDENTIFIER = 0xB2
     NODE_ADDRESS_BROADCAST = 0x7F
 
-    transportlayer_response_buffer = None
+    transportlayer_response_buffer = []
 
     class ChecksumError(Exception):
         pass
@@ -174,9 +174,7 @@ class Lin:
             self.log.debug(f"   positive response to {sid_mapped}")
 
     def response_waiting(self):
-        return self.transportlayer_response_buffer and len(
-            self.transportlayer_response_buffer
-        )
+        return len(self.transportlayer_response_buffer) > 0
 
     def loop_serial(self, serial: Serial, active):
         # Read three first bytes first - then decide whether to receive more or answer the request
@@ -290,12 +288,10 @@ class Lin:
         self.log.debug("out > " + format_bytes(databytes + bytes([cs])))
 
     def prepare_transportlayer_response(self, messages):
-        self.transportlayer_response_buffer = messages
+        self.transportlayer_response_buffer += messages
 
     def _answer_transportlayer_request(self):
-        if self.transportlayer_response_buffer and len(
-            self.transportlayer_response_buffer
-        ):
+        if self.response_waiting():
             return self.transportlayer_response_buffer.pop(0)
         else:
             # self.log.warning("No messages in transportlayer response buffer.")
