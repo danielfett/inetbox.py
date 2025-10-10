@@ -13,7 +13,7 @@ def int_to_bool(value):
 def temp_code_to_decimal(bytestring) -> str:
     if bytestring == 0xAAA or bytestring == 0xAAAA or bytestring == 0x0000:
         return "0"
-    return str((Decimal(bytestring) / Decimal(10) - Decimal(273)).quantize(Decimal("0.1")))
+    return str((Decimal(bytestring) / Decimal(10) - Decimal(273)))
 
 
 # convert two-byte representation of temperature to a str
