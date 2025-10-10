@@ -92,7 +92,7 @@ def heating_mode_to_string(heating_mode):
     elif heating_mode == 1:
         return "eco"
     elif heating_mode == 10:
-        return "high"
+        return "boost"
     else:
         return f"UNKNOWN ({heating_mode})"
 
@@ -102,7 +102,7 @@ def string_to_heating_mode(string):
         return 0
     elif string == "eco":
         return 1
-    elif string == "high":
+    elif string == "boost":
         return 10
     else:
         raise ValueError(f"Invalid heating mode: {string}")
