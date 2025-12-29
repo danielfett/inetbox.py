@@ -1,11 +1,13 @@
 from serial import Serial
-from . import InetboxLINProtocol, InetboxApp, Lin
+from . import InetboxLINProtocol, InetboxApp, Lin, TRANSLATIONS_HA_SENSOR_NAMES, TRANSLATIONS_STATES
 import miqro
+from miqro import ha_sensors
 from os import environ
 from datetime import timedelta, datetime
 import logging
 import logging.handlers
 from dateutil.tz import gettz
+import sys
 
 
 class TrumaService(miqro.Service):
@@ -17,12 +19,18 @@ class TrumaService(miqro.Service):
     TRUMA_DEFAULT_TEMP = 5
     TRUMA_DEFAULT_MODE = "eco"
     TRUMA_MAX_TIMEDELTA = timedelta(minutes=1)
+    MAX_UPDATE_WAIT = timedelta(seconds=60)
 
     updates_buffer = {}
     last_update_buffer_change = None
+    started_commit_updates = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
+
+        self.lang = self.service_config.get("language", "none")
+
+        self.create_ha_sensors()
 
         # Debug options either from environment (command line) or configuration file
         debug_app = self.service_config.get("debug_app", "DEBUG_APP" in environ)
@@ -58,7 +66,7 @@ class TrumaService(miqro.Service):
             seconds=self.service_config.get("updates_buffer_time", 1)
         )
 
-        self.inetapp = InetboxApp(debug_app)
+        self.inetapp = InetboxApp(debug_app, self.lang)
         self.inetprotocol = InetboxLINProtocol(self.inetapp, debug_protocol)
         serial_device = self.service_config.get("serial_device", "/dev/serial0")
         baudrate = self.service_config.get("baudrate", 9600)
@@ -212,12 +220,19 @@ class TrumaService(miqro.Service):
 
     @miqro.loop(seconds=0.1)
     def commit_updates(self):
+        # exit the application if it takes too long to commit updates
+        if self.started_commit_updates is not None:
+            if datetime.now() - self.started_commit_updates > self.MAX_UPDATE_WAIT:
+                self.log.exception("Taking too long to commit updates, resetting inetapp")
+                sys.exit(1)
+
         if self.last_update_buffer_change is None:
             return
         if datetime.now() - self.last_update_buffer_change < self.updates_buffer_time:
             return
 
         self.log.info(f"Committing updates {self.updates_buffer}")
+        self.started_commit_updates = datetime.now()
         for topic, msg in self.updates_buffer.items():
             try:
                 self.inetapp.set_status(topic, msg)
@@ -231,25 +246,28 @@ class TrumaService(miqro.Service):
 
     @miqro.loop(seconds=0.3)
     def send_update_status(self):
+        _ = TRANSLATIONS_STATES[self.lang]["update_status"]
         if self.last_update_buffer_change is not None:
             if not self.inetapp.can_send_updates():
-                status = "waiting_for_cp_plus"
+                status = _["waiting_for_cp_plus"]
             else:
-                status = "waiting_commit"
+                status = _["waiting_commit"]
         elif self.inetapp.updates_to_send:
-            status = "waiting_truma"
+            status = _["waiting_truma"]
         elif self.inetapp.updates_pending():
-            status = "waiting_truma"
+            status = _["waiting_truma"]
         else:
-            status = "idle"
+            status = _["idle"]
+            self.started_commit_updates = None
         self.publish("update_status", status, only_if_changed=timedelta(seconds=60))
 
     @miqro.loop(seconds=0.3)
     def send_cp_plus_status(self):
+        _ = TRANSLATIONS_STATES[self.lang]["cp_plus_status"]
         if self.inetapp.can_send_updates:
-            status = "online"
+            status = _["online"]
         else:
-            status = "waiting"
+            status = _["waiting"]
 
         self.publish("cp_plus_status", status, only_if_changed=timedelta(seconds=60))
 
@@ -292,6 +310,82 @@ class TrumaService(miqro.Service):
             self.inetapp.set_status("wall_time_seconds", str(current_seconds))
         else:
             self.log.info("Time is already up to date, no need to set it")
+
+
+    def create_ha_sensors(self):
+        _ = lambda s: TRANSLATIONS_HA_SENSOR_NAMES[self.lang].get(s, s)
+
+        dev = ha_sensors.Device(
+            self,
+            name=_("Truma Device"),
+            manufacturer="Truma",
+        )
+
+        target_temp_room = ha_sensors.Number(
+            dev,
+            name=_("Target Room Temperature"),
+            state_topic_postfix="control_status/target_temp_room",
+            command_topic_postfix="set/target_temp_room",
+            unit_of_measurement="°C",
+            device_class="temperature",
+            min=0,
+            max=30,
+            step=1,
+            icon="mdi:thermometer",
+        )
+
+        heating_mode = ha_sensors.Select(
+            dev,
+            name=_("Heating Mode"),
+            state_topic_postfix="control_status/heating_mode",
+            command_topic_postfix="set/heating_mode",
+            options=list(TRANSLATIONS_STATES[self.lang]["heating_mode"].values()),
+            icon="mdi:radiator",
+        )
+        
+        wall_time = ha_sensors.Text(
+            dev,
+            name=_("Time"),
+            min=8,
+            max=8,
+            pattern="^[012][0-9]:[0-5][0-9]:[0-5][0-9]$",
+            state_topic_postfix="control_status/wall_time",
+            command_topic_postfix="set/wall_time",
+            icon="mdi:clock-outline",
+            enabled_by_default=False,
+        )
+
+        update_status = ha_sensors.Sensor(
+            dev,
+            name=_("Update Status"),
+            state_topic_postfix="update_status",
+            icon="mdi:progress-clock"
+        )
+
+        cp_plus_status = ha_sensors.Sensor(
+            dev,
+            name=_("CP Plus Status"),
+            state_topic_postfix="cp_plus_status",
+            icon="mdi:server-network",
+            enabled_by_default=False,
+        )
+
+        set_time = ha_sensors.Button(
+            dev,
+            name=_("Set time from system time"),
+            command_topic_postfix="update_time",
+            icon="mdi:clock-check-outline",
+            enabled_by_default=False,
+        )
+
+        target_temp_water = ha_sensors.Select(
+            dev,
+            name=_("Water Heater Mode"),
+            state_topic_postfix="control_status/target_temp_water",
+            command_topic_postfix="set/target_temp_water",
+            options=list(TRANSLATIONS_STATES[self.lang]["target_temp_water"].values()),
+            icon="mdi:water-boiler",
+        )
 
 
 def run():

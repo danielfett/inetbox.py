@@ -372,8 +372,8 @@ class InetboxApp:
             cnv.string_to_heating_mode,
         ),
         "target_temp_water": (
-            cnv.temp_code_to_string,
-            cnv.string_to_temp_code,
+            cnv.water_temp_code_to_string,
+            cnv.string_to_water_temp_code,
         ),
         "el_power_level": (
             cnv.el_power_code_to_string,
@@ -392,20 +392,20 @@ class InetboxApp:
             cnv.string_to_temp_code,
         ),
         "timer_target_temp_water": (
-            cnv.temp_code_to_string,
-            cnv.string_to_temp_code,
+            cnv.water_temp_code_to_string,
+            cnv.string_to_water_temp_code,
         ),
         "timer_active": (
             cnv.bool_to_int,
             cnv.int_to_bool,
         ),
-        "timer_start_minutes": (int, int),
-        "timer_start_hours": (int, int),
-        "timer_stop_minutes": (int, int),
-        "timer_stop_hours": (int, int),
-        "wall_time_hours": (int, int),
-        "wall_time_minutes": (int, int),
-        "wall_time_seconds": (int, int),
+        "timer_start_minutes": (cnv.int_to_int, cnv.int_to_int),
+        "timer_start_hours": (cnv.int_to_int, cnv.int_to_int),
+        "timer_stop_minutes": (cnv.int_to_int, cnv.int_to_int),
+        "timer_stop_hours": (cnv.int_to_int, cnv.int_to_int),
+        "wall_time_hours": (cnv.int_to_int, cnv.int_to_int),
+        "wall_time_minutes": (cnv.int_to_int, cnv.int_to_int),
+        "wall_time_seconds": (cnv.int_to_int, cnv.int_to_int),
         "clock_mode": (cnv.clock_mode_to_string, cnv.string_to_clock_mode),
         "clock_source": (cnv.clock_source_to_string, cnv.string_to_clock_source),
     }
@@ -420,7 +420,10 @@ class InetboxApp:
 
     display_status = {}
 
-    def __init__(self, debug):
+    lang = "none"
+
+    def __init__(self, debug, lang):
+        self.lang = lang
         self.log = logging.getLogger("inet.app")
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
@@ -447,12 +450,12 @@ class InetboxApp:
     def parse_command_status(self, databytes):
         data = {
             "target_temp_room": cnv.temp_code_to_decimal(
-                databytes[0] | (databytes[1] & 0x0F) << 8
+                databytes[0] | (databytes[1] & 0x0F) << 8, self.lang
             ),
-            "target_temp_water": cnv.temp_code_to_decimal(
-                databytes[2] << 4 | (databytes[1] & 0xF0) >> 4
+            "target_temp_water": cnv.water_temp_code_to_string(
+                databytes[2] << 4 | (databytes[1] & 0xF0) >> 4, self.lang
             ),
-            "energy_mix": self.map_or_debug(self.ENERGY_MIX_MAPPING, databytes[3]),
+            "energy_mix": cnv.energy_mix_code_to_string(databytes[3], self.lang),
             "energy_mode": self.map_or_debug(self.ENERGY_MODE_MAPPING, databytes[4]),
             "energy_mode_2": self.map_or_debug(
                 self.ENERGY_MODE_2_MAPPING,
@@ -468,10 +471,10 @@ class InetboxApp:
     def parse_status_1(self, databytes):
         data = {
             "current_temp_room": cnv.temp_code_to_decimal(
-                databytes[0] | (databytes[1] & 0x0F) << 8
+                databytes[0] | (databytes[1] & 0x0F) << 8, self.lang
             ),
             "current_temp_water": cnv.temp_code_to_decimal(
-                databytes[2] << 4 | (databytes[1] & 0xF0) >> 4
+                databytes[2] << 4 | (databytes[1] & 0xF0) >> 4, self.lang
             ),
             "pid_21_unknown_byte_3": hex(databytes[3]),
             "pid_21_unknown_byte_4": hex(databytes[4]),
@@ -635,7 +638,7 @@ class InetboxApp:
             raise Exception(
                 f"Conversion function not defined - is this key ({key}) readable?"
             )
-        return self.STATUS_CONVERSION_FUNCTIONS[key][0](self.status[key])
+        return self.STATUS_CONVERSION_FUNCTIONS[key][0](self.status[key], self.lang)
 
     def set_status(self, key, value):
         # set the respective key in self.status, if it exists, and apply the conversion function
@@ -656,7 +659,14 @@ class InetboxApp:
 
     def get_all(self):
         self.status_updated = False
-        return {key: self.get_status(key) for key in self.status}
+        data = {key: self.get_status(key) for key in self.status}
+
+        # if wall_time_(hours|minutes|seconds) are in data, assemble combined value
+        if "wall_time_hours" in data and "wall_time_minutes" in data and "wall_time_seconds" in data:
+            wall_time = f"{data['wall_time_hours']:02}:{data['wall_time_minutes']:02}:{data['wall_time_seconds']:02}"
+            data.update({"wall_time": wall_time})
+
+        return data
 
     def updates_pending(self):
         return any(c.updates_pending for c in self.COMMANDS.values())

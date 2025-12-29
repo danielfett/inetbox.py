@@ -169,9 +169,15 @@ When started, the service will connect to the LIN bus and publish any status upd
 
 `service/truma/error` - some error messages are published here
 
+`service/truma/update_status` - status of sending updates to the heater. The status can only be updated when initiated by the heater, which may take a couple of seconds.
+
+`service/truma/cp_plus_status` - status of the connection to the CP Plus.
+
 `service/truma/display_status/#` - frequent updates from CP Plus, similar to what is shown on the display. Note that not all values have been decoded yet.
 
 `service/truma/control_status/#` - less frequent updates, but includes values that can be modified. These are the values that would otherwise be available in the Truma inet app.
+
+Note: Some values in `control_status` and the values of `update_status` and `cp_plus_status` can be translated to improve the user interface. This is especially useful when using this application with Homeassistant. To enable this, set `language` to one of the supported languages (see `inetbox/truma_service.py`); defaults to `none`. This does not affect values in `display_status`.  While the default values are in English, setting the language to `en` can stil improve the user interface.
 
 #### Changing settings
 
@@ -192,7 +198,7 @@ There are some specifics for certain settings:
 
  * `target_temp_room` and `heating_mode` must both be enabled for the heating to work. It's best to set both together as in the example above. If you set one without the other, a default for the other will be applied - this is configurable, see settings below.
  * `target_temp_room` can be set to 0 to turn off the heating, and 5-30 degrees otherwise.
- * `heating_mode` can be set to `off`, `eco` and `high` and defines the fan intensity for room heating.
+ * `heating_mode` can be set to `off`, `eco` and `boost` and defines the fan intensity for room heating.
  * `target_temp_water` must be set to one of `0` (off), `40` (equivalent to selecting 'eco' on the display), `60` ('high'), or `200` (boost)
  * `energy_mix` and `el_power_level` should be set together. You don't need to set these values unless you have a Combi E-version.
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
