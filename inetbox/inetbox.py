@@ -6,7 +6,7 @@ from .tools import format_bytes, calculate_checksum
 from . import conversions as cnv
 import bitstruct
 from typing import List, Tuple
-
+from random import randrange
 
 class InetboxLINProtocol:
     NODE_ADDRESS = 0x03
@@ -412,7 +412,7 @@ class InetboxApp:
 
     STATUS_HEADER_CHECKSUM_START = 8
 
-    status = {"_command_counter": 128}
+    status = {"_command_counter": randrange(0xFF)}
 
     status_updated = False
 
@@ -455,7 +455,7 @@ class InetboxApp:
             "target_temp_water": cnv.water_temp_code_to_string(
                 databytes[2] << 4 | (databytes[1] & 0xF0) >> 4, self.lang
             ),
-            "energy_mix": cnv.energy_mix_code_to_string(databytes[3], self.lang),
+            "energy_mix": self.map_or_debug(self.ENERGY_MIX_MAPPING, databytes[3]),
             "energy_mode": self.map_or_debug(self.ENERGY_MODE_MAPPING, databytes[4]),
             "energy_mode_2": self.map_or_debug(
                 self.ENERGY_MODE_2_MAPPING,
@@ -655,7 +655,7 @@ class InetboxApp:
                 f"Conversion function not defined - is this key ({key}) writable?"
             )
         self.log.debug(f"Setting {key} to {value}")
-        self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value)
+        self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value, self.lang)
 
     def get_all(self):
         self.status_updated = False

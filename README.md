@@ -203,6 +203,7 @@ There are some specifics for certain settings:
  * `energy_mix` and `el_power_level` should be set together. You don't need to set these values unless you have a Combi E-version.
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
+ * `heating_on_off` is a value that is synthetic (i.e., derived from the other values in software) that simply reflects if the room heating is on or off. If it is set to `on`, it tries to restore the previous room heating setting.
 
 Note: Since some settings only work together, like `target_temp_room` and `heating_mode`, the service does not apply changes immediately. Instead, changed settings are collected and only applied after a wait time of about a second. To change this time, set the `updates_buffer_time` setting in the `miqro.yml` file to the desired wait time in seconds (see settings below).
 
@@ -233,7 +234,7 @@ Alternatively, you can
 The following service-specific settings can be used in the `miqro.yml` file besides the [general miqro settings](https://github.com/danielfett/miqro?tab=readme-ov-file#configuration-file):
 
 - `default_target_temp_room` (default: 5) - The default target room temperature to set when the heating is enabled, but no target temperature is set.
-- `default_heating_mode` (default: 'eco') - The default heating mode to set when the target temperature is set to a value greater than 5°C, but no heating mode is set.
+- `default_heating_mode` (default: 'eco' or, if a language is specified, the respective translation) - The default heating mode to set when the target temperature is set to a value greater than 5°C, but no heating mode is set.
 - `updates_buffer_time` (default: 1) - The time in seconds to wait for more setting changes before applying them. This is useful when multiple settings need to be changed together.
 - `set_time` (default: False) - Automatically set the time on the Truma panel to the current system time every 24 hours.
 - `timezone_override` (default: None) - The timezone to use for setting the time on the Truma panel. If not set, the system timezone is used.

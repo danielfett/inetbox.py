@@ -1,13 +1,20 @@
 TRANSLATIONS_HA_SENSOR_NAMES = {
     "de": {
         "Truma Device": "Truma-Gerät",
-        "Target Room Temperature": "Raumtemperatur",
+        "Room Temperature": "Raumtemperatur",
         "Heating Mode": "Heizmodus",
         "Time": "Uhrzeit",
         "Update Status": "Update-Status",
         "CP Plus Status": "CP-Plus-Status",
         "Set time from system time": "Uhrzeit vom System übernehmen",
-        "Water Heater Mode": "Wasser"
+        "Water Heater": "Wasser",
+        "Energy Mix": "Energiemix",
+        "Electricity Power Level": "Leistung Strom",
+        "Operating Status": "Betriebsstatus",
+        "Water Temperature": "Wassertemperatur",
+        "Target Water Temperature": "Ziel-Wassertemperatur",
+        "Error Code": "Fehlercode",
+        "Supply Voltage": "Versorgungsspannung",
     },
 }
 

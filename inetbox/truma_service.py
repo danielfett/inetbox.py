@@ -17,13 +17,13 @@ class TrumaService(miqro.Service):
 
     TRUMA_MIN_TEMP = 5
     TRUMA_DEFAULT_TEMP = 5
-    TRUMA_DEFAULT_MODE = "eco"
     TRUMA_MAX_TIMEDELTA = timedelta(minutes=1)
     MAX_UPDATE_WAIT = timedelta(seconds=60)
 
     updates_buffer = {}
     last_update_buffer_change = None
     started_commit_updates = None
+    last_target_temp_room = None
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -39,8 +39,11 @@ class TrumaService(miqro.Service):
             "debug_protocol", "DEBUG_PROTOCOL" in environ
         )
         self.truma_default_heating_mode = self.service_config.get(
-            "default_heating_mode", self.TRUMA_DEFAULT_MODE
+            "default_heating_mode", TRANSLATIONS_STATES[self.lang]["heating_mode"][1]  # eco
         )
+        if self.truma_default_heating_mode not in TRANSLATIONS_STATES[self.lang]["heating_mode"].values():
+            raise ValueError(f"Invalid default heating mode: {self.truma_default_heating_mode}")
+            
         self.truma_default_target_temp_room = self.service_config.get(
             "default_target_temp_room", self.TRUMA_DEFAULT_TEMP
         )
@@ -87,17 +90,34 @@ class TrumaService(miqro.Service):
     @miqro.loop(seconds=0.5)
     def send_status(self):
         if self.inetapp.status_updated:
+            data = self.inetapp.get_all()
+
+            # add synthetic on/off switch for heating - simply based on temperature setting
+            if "target_temp_room" in data:
+                # update last_target_temp_room to restore it if the heating is turned off
+                self.last_target_temp_room = data["target_temp_room"]
+
+                # create synthetic on/off switch
+                target_temp_room = int(data["target_temp_room"])
+                if target_temp_room >= self.TRUMA_MIN_TEMP:
+                    data["heating_on_off"] = "on"
+                else:
+                    data["heating_on_off"] = "off"
+
+
             self.publish_json_keys(
-                self.inetapp.get_all(),
+                data,
                 "control_status",
                 only_if_changed=self.VALUE_UPDATE_MAX_INTERVAL,
             )
+
 
         self.publish_json_keys(
             self.inetapp.display_status,
             "display_status",
             only_if_changed=self.VALUE_UPDATE_MAX_INTERVAL,
         )
+
 
     @miqro.handle("set/#")
     def handle_set_message(self, msg, topic):
@@ -109,10 +129,37 @@ class TrumaService(miqro.Service):
         self.updates_buffer[topic] = msg
         self.last_update_buffer_change = datetime.now()
 
+        # we need to work with the translated values for the heating mode
+        _off = TRANSLATIONS_STATES[self.lang]["heating_mode"][0]
+        _eco = TRANSLATIONS_STATES[self.lang]["heating_mode"][1]
+        _boost = TRANSLATIONS_STATES[self.lang]["heating_mode"][10]
+
+        # Synthetic on/off switch
+        if topic == "heating_on_off":
+            if msg == "on":
+                # Restore last target temperature room or set to default if not available
+                if self.last_target_temp_room is not None and int(self.last_target_temp_room) >= self.TRUMA_MIN_TEMP:
+                    self.updates_buffer["target_temp_room"] = self.last_target_temp_room
+                else:
+                    self.updates_buffer["target_temp_room"] = str(self.truma_default_target_temp_room)
+                # Set heating mode to default
+                self.updates_buffer["heating_mode"] = self.truma_default_heating_mode
+                self.log.info("Turning heating on")
+            elif msg == "off":
+                self.updates_buffer["heating_mode"] = _off
+                self.updates_buffer["target_temp_room"] = "0"  # Truma cannot heat below 5°C
+                self.log.info("Turning heating off")
+            else:
+                self.log.error(f"Invalid heating_on_off value {msg}. Only 'on' and 'off' are allowed.")
+            # No further processing needed
+            del self.updates_buffer[topic]
+            return
+
         # Sanity check / automation for the dependency between room temperature and heating mode
         if topic == "target_temp_room":  # Only react to changes in the room temperature
             try:
-                target_temp = int(msg)
+                target_temp = int(float(msg))
+                self.updates_buffer[topic] = str(target_temp)  # store as integer string
             except ValueError:
                 self.log.error("Invalid target temperature value")
                 return
@@ -121,25 +168,25 @@ class TrumaService(miqro.Service):
             if target_temp >= self.TRUMA_MIN_TEMP:  # If it is desired to heat the room
                 if (
                     "heating_mode" in self.updates_buffer
-                    and self.updates_buffer["heating_mode"] == "off"
+                    and self.updates_buffer["heating_mode"] == _off
                 ) or (
                     "heating_mode" not in self.updates_buffer
-                    and self.inetapp.get_status("heating_mode", "off") == "off"
+                    and self.inetapp.get_status("heating_mode", _off) == _off
                 ):
                     self.updates_buffer["heating_mode"] = (
                         self.truma_default_heating_mode
                     )
                     self.log.info(
-                        "Setting heating mode to 'eco' as a temperature > 5°C was set"
+                        "Setting heating mode to default heating mode as a temperature > 5°C was set"
                     )
                 else:
                     self.log.info(
-                        "Heating mode is already set to 'eco' or 'boost', no change necessary"
+                        f"Heating mode is already set to '{self.updates_buffer.get('heating_mode', '???')}' (in updates) or '{self.inetapp.get_status('heating_mode', '???')}' (in last truma status), no change necessary"
                     )
 
             # The other way round: If the target temperature is set to lower than 5°C, turn off the heating.
             else:
-                self.updates_buffer["heating_mode"] = "off"
+                self.updates_buffer["heating_mode"] = _off
                 self.updates_buffer["target_temp_room"] = (
                     "0"  # Truma cannot heat below 5°C
                 )
@@ -150,13 +197,13 @@ class TrumaService(miqro.Service):
         # Similar for heating mode
         elif topic == "heating_mode":
             # And if the heating mode is turned off, set the target temperature to 0°C.
-            if msg == "off":
+            if msg == _off:
                 self.updates_buffer["target_temp_room"] = "0"
                 self.log.info(
                     "Setting target temperature to 0°C as heating was turned off"
                 )
             # If the heating mode is set to "eco" or "boost", set the target temperature to 18°C.
-            elif msg in ["eco", "boost"]:
+            elif msg in [_eco, _boost]:
                 if (
                     "target_temp_room" in self.updates_buffer
                     and int(self.updates_buffer["target_temp_room"])
@@ -178,7 +225,7 @@ class TrumaService(miqro.Service):
                     )
             else:
                 self.log.error(
-                    f"Invalid heating mode value {msg}. Only 'off', 'eco' and 'boost' are allowed."
+                    f"Invalid heating mode value {msg}. Only '{_off}', '{_eco}' and '{_boost}' are allowed."
                 )
 
         # parse date/time for clock setting
@@ -321,26 +368,26 @@ class TrumaService(miqro.Service):
             manufacturer="Truma",
         )
 
-        target_temp_room = ha_sensors.Number(
+        temp_climate_controller = ha_sensors.ClimateController(
             dev,
-            name=_("Target Room Temperature"),
-            state_topic_postfix="control_status/target_temp_room",
-            command_topic_postfix="set/target_temp_room",
-            unit_of_measurement="°C",
-            device_class="temperature",
-            min=0,
-            max=30,
-            step=1,
-            icon="mdi:thermometer",
-        )
-
-        heating_mode = ha_sensors.Select(
-            dev,
-            name=_("Heating Mode"),
-            state_topic_postfix="control_status/heating_mode",
-            command_topic_postfix="set/heating_mode",
-            options=list(TRANSLATIONS_STATES[self.lang]["heating_mode"].values()),
+            name=_("Room Temperature"),
+            current_temperature_topic_postfix="control_status/current_temp_room",
+            initial=0,
+            min_temp=0,
+            max_temp=30,
+            precision="1.0",
+            temperature_unit="C",
+            temperature_command_topic_postfix="set/target_temp_room",
+            temperature_state_topic_postfix="control_status/target_temp_room",
             icon="mdi:radiator",
+            fan_mode_command_topic_postfix="set/heating_mode",
+            fan_mode_state_topic_postfix="control_status/heating_mode",
+            fan_modes=list(TRANSLATIONS_STATES[self.lang]["heating_mode"].values()),
+            payload_on="on",
+            payload_off="off",
+            power_command_topic_postfix="set/heating_on_off",
+            state_topic_postfix="control_status/heating_on_off",
+            modes=[],  # only off and heat modes
         )
         
         wall_time = ha_sensors.Text(
@@ -380,13 +427,54 @@ class TrumaService(miqro.Service):
 
         target_temp_water = ha_sensors.Select(
             dev,
-            name=_("Water Heater Mode"),
+            name=_("Water Heater"),
             state_topic_postfix="control_status/target_temp_water",
             command_topic_postfix="set/target_temp_water",
             options=list(TRANSLATIONS_STATES[self.lang]["target_temp_water"].values()),
             icon="mdi:water-boiler",
         )
 
+        energy_mix = ha_sensors.Select(
+            dev,
+            name=_("Energy Mix"),
+            state_topic_postfix="control_status/energy_mix",
+            command_topic_postfix="set/energy_mix",
+            options=list(TRANSLATIONS_STATES[self.lang]["energy_mix"].values())
+        )
+
+        el_power_level = ha_sensors.Select(
+            dev,
+            name=_("Electricity Power Level"),
+            state_topic_postfix="control_status/el_power_level",
+            command_topic_postfix="set/el_power_level",
+            options=list(TRANSLATIONS_STATES[self.lang]["el_power_level"].values())
+        )
+
+        current_temp_water = ha_sensors.Sensor(
+            dev,
+            name=_("Water Temperature"),
+            state_topic_postfix="control_status/current_temp_water",
+            unit_of_measurement="°C",
+            icon="mdi:thermometer-water",
+            device_class="temperature",
+        )
+
+        error_code = ha_sensors.Sensor(
+            dev,
+            name=_("Error Code"),
+            state_topic_postfix="control_status/error_code",
+            icon="mdi:alert-circle-outline",
+        )
+
+        voltage = ha_sensors.Sensor(
+            dev,
+            name=_("Supply Voltage"),
+            state_topic_postfix="display_status/voltage",
+            unit_of_measurement="V",
+            icon="mdi:flash",
+            device_class="voltage",
+            suggested_display_precision=1,
+        )
 
 def run():
     miqro.run(TrumaService)
