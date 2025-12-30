@@ -146,3 +146,34 @@ def string_to_clock_source(string, lang) -> int:
         if name == string:
             return code
     raise ValueError(f"Invalid clock source code: {string}")
+
+def aircon_vent_mode_to_string(aircon_vent_mode, lang) -> str:
+    strings = TRANSLATIONS_STATES[lang]["aircon_vent_mode"]
+    # Convert hex values (0x71-0x77) to decimal for lookup
+    if aircon_vent_mode in [0x71, 0x72, 0x73, 0x74, 0x77]:
+        aircon_vent_mode = int(aircon_vent_mode)
+    try:
+        return strings[aircon_vent_mode]
+    except KeyError:
+        print(f"Unknown aircon vent mode code: {aircon_vent_mode}")
+        return TRANSLATIONS_STATES[lang]["unknown"]
+
+def string_to_aircon_vent_mode(string, lang) -> int:
+    for code, name in TRANSLATIONS_STATES[lang]["aircon_vent_mode"].items():
+        if name == string:
+            return code
+    raise ValueError(f"Invalid aircon vent mode code: {string}")
+
+def aircon_operating_mode_to_string(aircon_operating_mode, lang) -> str:
+    strings = TRANSLATIONS_STATES[lang]["aircon_operating_mode"]
+    try:
+        return strings[aircon_operating_mode]
+    except KeyError:
+        print(f"Unknown aircon operating mode code: {aircon_operating_mode}")
+        return TRANSLATIONS_STATES[lang]["unknown"]
+
+def string_to_aircon_operating_mode(string, lang) -> int:
+    for code, name in TRANSLATIONS_STATES[lang]["aircon_operating_mode"].items():
+        if name == string:
+            return code
+    raise ValueError(f"Invalid aircon operating mode code: {string}")

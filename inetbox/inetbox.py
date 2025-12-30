@@ -110,13 +110,18 @@ class InetboxLINProtocol:
         elif sid == 0xBA:
             self.log.debug("Received request for data upload: %s", request_payload)
 
+            # Try heater buffer first
             send_buffer = self.app._get_status_buffer_for_writing()
+
+            # If no heater buffer, try AC buffer
+            if send_buffer is None:
+                send_buffer = self.app._get_aircon_status_buffer_for_writing()
 
             if send_buffer is None:
                 self.log.debug("Not responding, waiting for status message first!")
                 return
 
-            # pad the buffer with zeros
+            # pad the buffer with zeros to 38 bytes (standard size)
             send_buffer += bytes(38 - len(send_buffer))
 
             lin.prepare_transportlayer_response(
@@ -260,6 +265,20 @@ class InetboxApp:
         0x32: "fatal error",
         0x21: "airvent (?)",
     }
+    AIRCON_VENT_MODE_MAPPING = {
+        0x71: "low",
+        0x72: "mid",
+        0x73: "high",
+        0x74: "night",
+        0x77: "auto",
+    }
+    AIRCON_OPERATING_STATUS = {
+        0x0: "off",
+        0x4: "vent",
+        0x5: "cool",
+        0x6: "hot",
+        0x7: "auto",
+    }
     CP_PLUS_DISPLAY_STATUS_MAPPING = {
         0xF0: "heating on",
         0x20: "standby ac on",
@@ -354,10 +373,26 @@ class InetboxApp:
         ],
     )
 
+    COMMAND_AIRCON = TrumaCommand(
+        0x35,  # when receiving, sending is that -1 (0x34)
+        [
+            ("aircon_operating_mode", "u8"),  # 0x00
+            ("_aircon_unknown1", "u8"),  # 0x01
+            ("aircon_vent_mode", "u8"),  # 0x02
+            ("_aircon_unknown2", "u8"),  # 0x03
+            ("target_temp_aircon", "u16"),  # 0x04, 0x05
+            ("_aircon_unknown3", "u16"),  # 0x06, 0x07
+            ("_aircon_unknown4", "u16"),  # 0x08, 0x09
+            ("_aircon_unknown5", "u16"),  # 0x0A, 0x0B
+            ("_aircon_unknown6", "u16"),  # 0x0C, 0x0D
+        ],
+    )
+
     COMMANDS = {
         0x33: COMMAND_STATUS,
         0x3D: COMMAND_TIMER,
         0x15: COMMAND_TIME,
+        0x35: COMMAND_AIRCON,
     }
 
     STATUS_BUFFER_COMMAND_ID_COMMAND_COUNTER = 0x0D
@@ -408,6 +443,18 @@ class InetboxApp:
         "wall_time_seconds": (cnv.int_to_int, cnv.int_to_int),
         "clock_mode": (cnv.clock_mode_to_string, cnv.string_to_clock_mode),
         "clock_source": (cnv.clock_source_to_string, cnv.string_to_clock_source),
+        "aircon_operating_mode": (
+            cnv.aircon_operating_mode_to_string,
+            cnv.string_to_aircon_operating_mode,
+        ),
+        "aircon_vent_mode": (
+            cnv.aircon_vent_mode_to_string,
+            cnv.string_to_aircon_vent_mode,
+        ),
+        "target_temp_aircon": (
+            cnv.temp_code_to_string,
+            cnv.string_to_temp_code,
+        ),
     }
 
     STATUS_HEADER_CHECKSUM_START = 8
@@ -564,8 +611,13 @@ class InetboxApp:
             f"Received status buffer update for {header}: {parsed_status_buffer}"
         )
 
-    def _find_command_with_updates(self):
+    def _find_command_with_updates(self, command_type=None):
+        """Find command with updates. command_type can be 'heater' or 'aircon'."""
         for command in self.COMMANDS.values():
+            if command_type == 'heater' and command.cid not in [0x33, 0x3D, 0x15]:
+                continue
+            if command_type == 'aircon' and command.cid != 0x35:
+                continue
             if any(
                 key in self.updates_to_send
                 for key in command.attributes_rw
@@ -575,11 +627,10 @@ class InetboxApp:
         return None
 
     def _get_status_buffer_for_writing(self):
-        command = self._find_command_with_updates()
+        command = self._find_command_with_updates('heater')
 
         if command is None:
-            self.log.debug("No updates to send.")
-            self.updates_to_send = {}
+            self.log.debug("No heater updates to send.")
             return None
 
         # increase output message counter
@@ -620,6 +671,54 @@ class InetboxApp:
             + binary_buffer_contents
         )
         self.log.debug(f"Sending status buffer: {format_bytes(output)}")
+        return output
+
+    def _get_aircon_status_buffer_for_writing(self):
+        """Get AC status buffer for writing (command ID 0x34)."""
+        command = self._find_command_with_updates('aircon')
+
+        if command is None:
+            self.log.debug("No AC updates to send.")
+            return None
+
+        # increase output message counter
+        self.status["_command_counter"] = (self.status["_command_counter"] + 1) % 0xFF
+
+        # get current status buffer contents as dict
+        binary_buffer_contents = command.pack(
+            {**self.status, **self.updates_to_send}
+        )
+        if binary_buffer_contents is None:
+            self.log.debug("Not all required AC data in status buffer yet.")
+            return None
+
+        # calculate checksum
+        checksum = calculate_checksum(
+            self.STATUS_BUFFER_PREAMBLE[self.STATUS_HEADER_CHECKSUM_START :]
+            + bytes(
+                [command.write_len, command.cid_write, self.status["_command_counter"]]
+            )
+            + binary_buffer_contents
+        )
+
+        # remove those elements from updates_to_send that have now been sent
+        for key in command.attributes_rw:
+            if key in self.updates_to_send:
+                del self.updates_to_send[key]
+
+        output = (
+            self.STATUS_BUFFER_PREAMBLE
+            + bytes(
+                [
+                    command.write_len,
+                    command.cid_write,
+                    self.status["_command_counter"],
+                    checksum,
+                ],
+            )
+            + binary_buffer_contents
+        )
+        self.log.debug(f"Sending AC status buffer: {format_bytes(output)}")
         return output
 
     def get_status(self, key, default=None):

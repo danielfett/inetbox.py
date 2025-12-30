@@ -213,6 +213,12 @@ class TrumaService(miqro.Service):
             self.updates_buffer["wall_time_minutes"] = minutes
             self.updates_buffer["wall_time_seconds"] = seconds
 
+        # Handle AC commands
+        elif topic in ["aircon_operating_mode", "aircon_vent_mode", "target_temp_aircon"]:
+            # AC commands are handled directly, no special validation needed
+            # The conversion functions will validate the values
+            pass
+
         if not self.inetapp.can_send_updates:
             msg = "Cannot send updates to inetapp, no status received from CP Plus yet. Changes will be delayed until status received."
             self.log.error(msg)
@@ -385,6 +391,37 @@ class TrumaService(miqro.Service):
             command_topic_postfix="set/target_temp_water",
             options=list(TRANSLATIONS_STATES[self.lang]["target_temp_water"].values()),
             icon="mdi:water-boiler",
+        )
+
+        aircon_operating_mode = ha_sensors.Select(
+            dev,
+            name=_("Air Conditioning Mode"),
+            state_topic_postfix="control_status/aircon_operating_mode",
+            command_topic_postfix="set/aircon_operating_mode",
+            options=list(TRANSLATIONS_STATES[self.lang]["aircon_operating_mode"].values()),
+            icon="mdi:air-conditioner",
+        )
+
+        aircon_vent_mode = ha_sensors.Select(
+            dev,
+            name=_("Air Conditioning Vent Mode"),
+            state_topic_postfix="control_status/aircon_vent_mode",
+            command_topic_postfix="set/aircon_vent_mode",
+            options=list(TRANSLATIONS_STATES[self.lang]["aircon_vent_mode"].values()),
+            icon="mdi:fan",
+        )
+
+        target_temp_aircon = ha_sensors.Number(
+            dev,
+            name=_("Target Air Conditioning Temperature"),
+            state_topic_postfix="control_status/target_temp_aircon",
+            command_topic_postfix="set/target_temp_aircon",
+            unit_of_measurement="°C",
+            device_class="temperature",
+            min=20,
+            max=30,
+            step=1,
+            icon="mdi:thermometer",
         )
 
 

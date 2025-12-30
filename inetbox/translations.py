@@ -59,6 +59,20 @@ TRANSLATIONS_STATES = {
             "40": "40",
             "60": "60",
             "200": "200"
+        },
+        "aircon_operating_mode": {
+            0: "off",
+            4: "vent",
+            5: "cool",
+            6: "hot",
+            7: "auto"
+        },
+        "aircon_vent_mode": {
+            113: "low",
+            114: "mid",
+            115: "high",
+            116: "night",
+            119: "auto"
         }
     },
     "de": {
@@ -108,6 +122,20 @@ TRANSLATIONS_STATES = {
             "40": "eco",
             "60": "high",
             "200": "boost"
+        },
+        "aircon_operating_mode": {
+            0: "aus",
+            4: "Lüften",
+            5: "Kühlen",
+            6: "Heizen",
+            7: "Auto"
+        },
+        "aircon_vent_mode": {
+            113: "niedrig",
+            114: "mittel",
+            115: "hoch",
+            116: "Nacht",
+            119: "Auto"
         }
     },
     "en": {
@@ -157,6 +185,20 @@ TRANSLATIONS_STATES = {
             "40": "eco",
             "60": "high",
             "200": "boost"
+        },
+        "aircon_operating_mode": {
+            0: "off",
+            4: "vent",
+            5: "cool",
+            6: "hot",
+            7: "auto"
+        },
+        "aircon_vent_mode": {
+            113: "low",
+            114: "mid",
+            115: "high",
+            116: "night",
+            119: "auto"
         }
     }
 }
