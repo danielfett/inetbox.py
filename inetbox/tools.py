@@ -1,5 +1,3 @@
-
-
 def format_bytes(bytestring):
     return " ".join("{:02x}".format(c) for c in bytestring)
 

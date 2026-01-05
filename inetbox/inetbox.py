@@ -8,6 +8,7 @@ import bitstruct
 from typing import List, Tuple
 from random import randrange
 
+
 class InetboxLINProtocol:
     NODE_ADDRESS = 0x03
     IDENTIFIER = bytes([0x17, 0x46, 0x00, 0x1F])
@@ -87,7 +88,9 @@ class InetboxLINProtocol:
                 self.transportlayer_received_request_payload = None
         else:
             sid = f"{sid:x}" if isinstance(sid, int) else sid
-            self.log.debug(f"No idea how to answer this message: frame_type={frame_type} sid={sid} payload={payload}")
+            self.log.debug(
+                f"No idea how to answer this message: frame_type={frame_type} sid={sid} payload={payload}"
+            )
             pass
 
     def _complete_transportlayer_request(self, lin: Lin, sid, request_payload):
@@ -207,7 +210,7 @@ class TrumaCommand:
     def pack(self, data):
         if not self.can_send_updates:
             return None
-        
+
         self.updates_pending = True
         try:
             return self.bitstruct_write.pack(data)
@@ -215,7 +218,7 @@ class TrumaCommand:
             # not all required data in status buffer yet
             self.can_send_updates = False
             return None
-        
+
     @property
     def cid_write(self):
         return self.cid - 1
@@ -586,9 +589,7 @@ class InetboxApp:
         self.status["_command_counter"] = (self.status["_command_counter"] + 1) % 0xFF
 
         # get current status buffer contents as dict
-        binary_buffer_contents = command.pack(
-            {**self.status, **self.updates_to_send}
-        )
+        binary_buffer_contents = command.pack({**self.status, **self.updates_to_send})
         if binary_buffer_contents is None:
             self.log.debug("Not all required data in status buffer yet.")
             return None
@@ -655,14 +656,20 @@ class InetboxApp:
                 f"Conversion function not defined - is this key ({key}) writable?"
             )
         self.log.debug(f"Setting {key} to {value}")
-        self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](value, self.lang)
+        self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](
+            value, self.lang
+        )
 
     def get_all(self):
         self.status_updated = False
         data = {key: self.get_status(key) for key in self.status}
 
         # if wall_time_(hours|minutes|seconds) are in data, assemble combined value
-        if "wall_time_hours" in data and "wall_time_minutes" in data and "wall_time_seconds" in data:
+        if (
+            "wall_time_hours" in data
+            and "wall_time_minutes" in data
+            and "wall_time_seconds" in data
+        ):
             wall_time = f"{data['wall_time_hours']:02}:{data['wall_time_minutes']:02}:{data['wall_time_seconds']:02}"
             data.update({"wall_time": wall_time})
 

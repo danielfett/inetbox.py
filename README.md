@@ -12,6 +12,10 @@ USE OR INABILITY TO USE THE PROGRAM.
 
 That said, it is working for me, and I hope it will work for you, too.
 
+![control panel for a Truma heating in Homeassistant](image-ha.png)
+
+*inetbox.org in Homeassistant*
+
 ## Hardware Requirements
 
 This has been tested with a Truma Combi 4 and the CP Plus control panel (inet ready). I don't see why this wouldn't be working with the Combi 6 and E models as well.
@@ -165,6 +169,8 @@ services:
 
 When started, the service will connect to the LIN bus and publish any status updates acquired from there. When you send a command to modify a setting (e.g., to turn on the heating), the service will send the command to the LIN bus and publish the new status once the setting has been confirmed.
 
+Note: Since Dec. 2025, Homeassistant entities are created as well.
+
 #### MQTT topics for receiving status
 
 `service/truma/error` - some error messages are published here
@@ -203,7 +209,7 @@ There are some specifics for certain settings:
  * `energy_mix` and `el_power_level` should be set together. You don't need to set these values unless you have a Combi E-version.
  * `energy_mix` can be one of `none`/`gas`/`electricity`/`mix`
  * `el_power_level` can be set to `0`/`900`/`1800` when electric heating or mix is enabled
- * `heating_on_off` is a value that is synthetic (i.e., derived from the other values in software) that simply reflects if the room heating is on or off. If it is set to `on`, it tries to restore the previous room heating setting.
+ * `mode` is a value that is synthetic (i.e., derived from the other values in software) that simply reflects if the device is `off` or heating (`heat`). If it is set to `heat`, it tries to restore the previous room heating setting.
 
 Note: Since some settings only work together, like `target_temp_room` and `heating_mode`, the service does not apply changes immediately. Instead, changed settings are collected and only applied after a wait time of about a second. To change this time, set the `updates_buffer_time` setting in the `miqro.yml` file to the desired wait time in seconds (see settings below).
 

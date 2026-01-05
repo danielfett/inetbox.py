@@ -27,46 +27,14 @@ TRANSLATIONS_STATES = {
             "waiting_truma": "waiting_truma",
             "idle": "idle",
         },
-        "cp_plus_status": {
-            "online": "online",
-            "waiting": "waiting"
-        },
-        "operating_status": {
-            0: "Off",
-            1: "WARNING",
-            4: "On (starting)",
-            5: "On"
-        },
-        "el_power_level": {
-            0: "0",
-            900: "900",
-            1800: "1800"
-        },
-        "energy_mix": {
-            0b00: "none",
-            0b01: "gas",
-            0b10: "electricity",
-            0b11: "mix"
-        },
-        "heating_mode": {
-            0: "off",
-            1: "eco",
-            10: "boost"
-        },
-        "clock_mode": {
-            0: "24h",
-            1: "12h"
-        },
-        "clock_source": {
-            1: "manual",
-            2: "inetbox"
-        },
-        "target_temp_water": {
-            "0": "0",
-            "40": "40",
-            "60": "60",
-            "200": "200"
-        }
+        "cp_plus_status": {"online": "online", "waiting": "waiting"},
+        "operating_status": {0: "Off", 1: "WARNING", 4: "On (starting)", 5: "On"},
+        "el_power_level": {0: "0", 900: "900", 1800: "1800"},
+        "energy_mix": {0b00: "none", 0b01: "gas", 0b10: "electricity", 0b11: "mix"},
+        "heating_mode": {0: "off", 1: "eco", 10: "boost"},
+        "clock_mode": {0: "24h", 1: "12h"},
+        "clock_source": {1: "manual", 2: "inetbox"},
+        "target_temp_water": {"0": "0", "40": "40", "60": "60", "200": "200"},
     },
     "de": {
         "unknown": "UNBEKANNT",
@@ -76,46 +44,14 @@ TRANSLATIONS_STATES = {
             "waiting_truma": "Warte auf Truma",
             "idle": "Leerlauf",
         },
-        "cp_plus_status": {
-            "online": "online",
-            "waiting": "warte..."
-        },
-        "operating_status": {
-            0: "Aus",
-            1: "WARNUNG",
-            4: "Ein (Starte)",
-            5: "Ein"
-        },
-        "el_power_level": {
-            0: "aus",
-            900: "900 W",
-            1800: "1800 W"
-        },
-        "energy_mix": {
-            0b00: "keine",
-            0b01: "Gas",
-            0b10: "Strom",
-            0b11: "Mischung"
-        },
-        "heating_mode": {
-            0: "aus",
-            1: "eco",
-            10: "boost"
-        },
-        "clock_mode": {
-            0: "24 Stunden",
-            1: "12 Stunden"
-        },
-        "clock_source": {
-            1: "manuell",
-            2: "inetbox"
-        },
-        "target_temp_water": {
-            "0": "aus",
-            "40": "eco",
-            "60": "high",
-            "200": "boost"
-        }
+        "cp_plus_status": {"online": "online", "waiting": "warte..."},
+        "operating_status": {0: "Aus", 1: "WARNUNG", 4: "Ein (Starte)", 5: "Ein"},
+        "el_power_level": {0: "aus", 900: "900 W", 1800: "1800 W"},
+        "energy_mix": {0b00: "keine", 0b01: "Gas", 0b10: "Strom", 0b11: "Mischung"},
+        "heating_mode": {0: "aus", 1: "eco", 10: "boost"},
+        "clock_mode": {0: "24 Stunden", 1: "12 Stunden"},
+        "clock_source": {1: "manuell", 2: "inetbox"},
+        "target_temp_water": {"0": "aus", "40": "eco", "60": "high", "200": "boost"},
     },
     "en": {
         "unknown": "UNKNOWN",
@@ -125,45 +61,13 @@ TRANSLATIONS_STATES = {
             "waiting_truma": "waiting for Truma",
             "idle": "idle",
         },
-        "cp_plus_status": {
-            "online": "online",
-            "waiting": "waiting"
-        },
-        "operating_status": {
-            0: "off",
-            1: "WARNING",
-            4: "on (starting)",
-            5: "on"
-        },
-        "el_power_level": {
-            0: "off",
-            900: "900 W",
-            1800: "1800 W"
-        },
-        "energy_mix": {
-            0b00: "none",
-            0b01: "gas",
-            0b10: "electricity",
-            0b11: "mix"
-        },
-        "heating_mode": {
-            0: "off",
-            1: "eco",
-            10: "boost"
-        },
-        "clock_mode": {
-            0: "24h",
-            1: "12h"
-        },
-        "clock_source": {
-            1: "manual",
-            2: "inetbox"
-        },
-        "target_temp_water": {
-            "0": "off",
-            "40": "eco",
-            "60": "high",
-            "200": "boost"
-        }
-    }
+        "cp_plus_status": {"online": "online", "waiting": "waiting"},
+        "operating_status": {0: "off", 1: "WARNING", 4: "on (starting)", 5: "on"},
+        "el_power_level": {0: "off", 900: "900 W", 1800: "1800 W"},
+        "energy_mix": {0b00: "none", 0b01: "gas", 0b10: "electricity", 0b11: "mix"},
+        "heating_mode": {0: "off", 1: "eco", 10: "boost"},
+        "clock_mode": {0: "24h", 1: "12h"},
+        "clock_source": {1: "manual", 2: "inetbox"},
+        "target_temp_water": {"0": "off", "40": "eco", "60": "high", "200": "boost"},
+    },
 }
