@@ -16,6 +16,23 @@ TRANSLATIONS_HA_SENSOR_NAMES = {
         "Error Code": "Fehlercode",
         "Supply Voltage": "Versorgungsspannung",
     },
+    "en": {
+        "Truma Device": "Truma Device",
+        "Room Temperature": "Room Temperature",
+        "Heating Mode": "Heating Mode",
+        "Time": "Time",
+        "Update Status": "Update Status",
+        "CP Plus Status": "CP Plus Status",
+        "Set time from system time": "Set time from system time",
+        "Water Heater": "Water Heater",
+        "Energy Mix": "Energy Mix",
+        "Electricity Power Level": "Electricity Power Level",
+        "Operating Status": "Operating Status",
+        "Water Temperature": "Water Temperature",
+        "Target Water Temperature": "Target Water Temperature",
+        "Error Code": "Error Code",
+        "Supply Voltage": "Supply Voltage",
+    },
 }
 
 TRANSLATIONS_STATES = {
