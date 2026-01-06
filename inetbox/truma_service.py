@@ -36,6 +36,9 @@ class TrumaService(miqro.Service):
 
         self.lang = self.service_config.get("language", "none")
 
+        # enable MQTT optimistic mode if enabled in service_config
+        self.optimistic = self.service_config.get("optimistic", False)
+
         self.create_ha_sensors()
 
         # Debug options either from environment (command line) or configuration file
@@ -419,6 +422,7 @@ class TrumaService(miqro.Service):
             modes=["off", "heat"],  # only off and heat modes
             mode_command_topic_postfix="set/mode",
             mode_state_topic_postfix="control_status/mode",
+            optimistic=self.optimistic,
         )
 
         wall_time = ha_sensors.Text(
@@ -431,6 +435,7 @@ class TrumaService(miqro.Service):
             command_topic_postfix="set/wall_time",
             icon="mdi:clock-outline",
             enabled_by_default=False,
+            optimistic=self.optimistic,
         )
 
         update_status = ha_sensors.Sensor(
@@ -470,6 +475,7 @@ class TrumaService(miqro.Service):
             command_topic_postfix="set/target_temp_water",
             options=list(TRANSLATIONS_STATES[self.lang]["target_temp_water"].values()),
             icon="mdi:water-boiler",
+            optimistic=self.optimistic,
         )
 
         energy_mix = ha_sensors.Select(
@@ -478,6 +484,7 @@ class TrumaService(miqro.Service):
             state_topic_postfix="control_status/energy_mix",
             command_topic_postfix="set/energy_mix",
             options=list(TRANSLATIONS_STATES[self.lang]["energy_mix"].values()),
+            optimistic=self.optimistic,
         )
 
         el_power_level = ha_sensors.Select(
@@ -486,6 +493,7 @@ class TrumaService(miqro.Service):
             state_topic_postfix="control_status/el_power_level",
             command_topic_postfix="set/el_power_level",
             options=list(TRANSLATIONS_STATES[self.lang]["el_power_level"].values()),
+            optimistic=self.optimistic,
         )
 
         current_temp_water = ha_sensors.Sensor(
