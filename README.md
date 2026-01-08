@@ -251,6 +251,7 @@ The following service-specific settings can be used in the `miqro.yml` file besi
 - `debug_app` (default: False) - Enable debugging for the application layer.
 - `debug_lin` (default: False) - Enable debugging for the LIN layer.
 - `debug_protocol` (default: False) - Enable debugging for the protocol layer.
+- `ha_optimistic` (default: False) - Enables MQTT optimistic mode for Home Assistant entities via auto discovery. When enabled, commands are assumed successful even if no confirmation is received from the device.
 
 ### Installing the Systemd Service
 
