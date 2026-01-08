@@ -37,7 +37,7 @@ class TrumaService(miqro.Service):
         self.lang = self.service_config.get("language", "none")
 
         # enable MQTT optimistic mode if enabled in service_config
-        self.optimistic = self.service_config.get("optimistic", False)
+        self.optimistic = self.service_config.get("ha_optimistic", False)
 
         self.create_ha_sensors()
 
