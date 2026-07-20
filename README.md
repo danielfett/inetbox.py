@@ -237,9 +237,11 @@ There are three ways to update the clock on the Truma panel:
 
 This software implements a feature that helps with implementing frost protection. By default, the Truma settings allow a minimum room temperature of 5°C. This means that the heating will turn on even if the temperatures stay well above 0°C. While it is easy to set the heating based on external sensors via an MQTT message, care must be taken not to overwrite an existing, potentially higher target room temperature, and to restore the original setting after the sensor values are back to normal.
 
-By sending `on` to `service/truma/extras/frost_protection/set`, the software will set the target room temperature to 5°C and the heating mode to `eco` **unless a higher target room temperature is already set**. The temperature is configurable via the `frost_protection_temp_room` setting in the `miqro.yml` file.
+By sending `on` to `service/truma/extras/frost_protection/set`, the software will set the target room temperature to 5°C and the heating mode to `eco` **unless a higher target room temperature is already set**. The temperature for frost protection is configurable via the `frost_protection_temp_room` setting in the `miqro.yml` file.
 
 Send `off` to `service/truma/extras/frost_protection/set` to restore the original target room temperature and heating mode or turn the heating off if it was off previously.
+
+The status of the frost protection can be read from `service/truma/extras/frost_protection/status`. Values are `on`, `off`, and `error` in case the frost protection could not be activated.
 
 ### Service Settings
 

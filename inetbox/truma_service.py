@@ -32,7 +32,7 @@ class TrumaService(miqro.Service):
     last_target_temp_room = None
     frost_protection = False
 
-    frost_protection_heating_enabled_before = False
+    frost_protection_heating_status_before = {}
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -531,19 +531,26 @@ class TrumaService(miqro.Service):
     @miqro.handle("extras/frost_protection/set")
     def handle_frost_protection_set(self, msg):
         if msg in ["on", "ON", "true", "1"]:
-            self.frost_protection_heating_enabled_before = self.inetapp.get_status(
-                "heating_mode", "off"
-            ) in ["eco", "boost"]
+            try:
+                self.frost_protection_heating_status_before = {
+                    "target_temp_room": self.inetapp.get_status("target_temp_room"),
+                    "heating_mode": self.inetapp.get_status("heating_mode"),
+                }
+            except Exception as e:
+                self.log.exception(e)
+                self.publish("extras/frost_protection/status", "error")
+                return
             self.frost_protection = True
+            self.publish("extras/frost_protection/status", "on")
         else:
             self.frost_protection = False
-            # if the heating was not enabled before, switch it off again
-            if not self.frost_protection_heating_enabled_before:
-                self.inetapp.set_status("heating_mode", "off")
-                self.inetapp.set_status("target_temp_room", "0")
-                self.log.info(
-                    "Frost protection disabled: Setting heating mode to 'off' and target temperature to 0°C"
-                )
+            # if the heating was on a lower level before, reset it to that level
+            for key, value in self.frost_protection_heating_status_before.items():
+                self.inetapp.set_status(key, value)
+            self.log.info(
+                f"Frost protection disabled, resetting heating to previous values: {self.frost_protection_heating_status_before}"
+            )
+            self.publish("extras/frost_protection/status", "off")
 
     @miqro.loop(minutes=5)
     def check_frost_protection(self):
@@ -552,8 +559,9 @@ class TrumaService(miqro.Service):
 
         # check if heating is enabled
         enabled = self.inetapp.get_status("heating_mode", "off") in ["eco", "boost"]
+        temp = int(self.inetapp.get_status("target_temp_room", "0"))
 
-        if not enabled:
+        if not enabled or temp < int(self.truma_frost_protection_temp_room):
             self.inetapp.set_status("heating_mode", "eco")
             self.inetapp.set_status(
                 "target_temp_room", self.truma_frost_protection_temp_room
