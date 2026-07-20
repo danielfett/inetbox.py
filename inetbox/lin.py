@@ -245,6 +245,28 @@ class Lin:
                 )
             return
 
+        # The transport-layer "slave -> master" poll (and, defensively, its
+        # "master -> slave" counterpart) may legitimately go unanswered -
+        # neither we nor the real slave always have data queued. When that
+        # happens the master sends no data field at all and proceeds
+        # straight to the next frame's break+sync. If the two bytes right
+        # after the PID look exactly like a break+sync pair, that's the
+        # next frame's header, not this frame's payload - drop this
+        # (unanswered) header instead of misreading the next frame as data.
+        if (
+            pid
+            in (
+                self.PID_TRANSPORTLAYER_MASTER2SLAVE,
+                self.PID_TRANSPORTLAYER_SLAVE2MASTER,
+            )
+            and self._rx_buffer[sync_index + 2 : sync_index + 4] == b"\x00\x55"
+        ):
+            self.log.debug(
+                f"in < pid {pid:02x} header went unanswered (no data field) → dropping"
+            )
+            del self._rx_buffer[: sync_index + 2]
+            return
+
         # full frame: PID + up to 9 more bytes (payload + checksum)
         frame_end = sync_index + 2 + 9
         if len(self._rx_buffer) < frame_end:
