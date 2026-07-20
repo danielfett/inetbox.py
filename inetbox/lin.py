@@ -30,6 +30,11 @@ class Lin:
         self.protocol = protocol
         self.log = logging.getLogger("inet.lin")
 
+        # persistent receive buffer used to resync to the LIN byte stream;
+        # kept across calls to loop_serial so a short/partial read never
+        # loses bytes and misalignment can be recovered one byte at a time
+        self._rx_buffer = bytearray()
+
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
 
@@ -177,46 +182,82 @@ class Lin:
         return len(self.transportlayer_response_buffer) > 0
 
     def loop_serial(self, serial: Serial, active):
-        # Read three first bytes first - then decide whether to receive more or answer the request
-        line = serial.read(3)
-        if len(line) < 3:
-            return
+        # Pull in whatever bytes are currently available (or wait up to the
+        # configured timeout for at least one) and append them to a
+        # persistent buffer. Using a persistent buffer instead of one-shot
+        # fixed-size reads means a short/partial read never silently drops
+        # bytes, and resync after a misalignment can happen one byte at a
+        # time instead of in fixed 3-byte jumps.
+        chunk = serial.read(max(serial.in_waiting, 1))
+        if chunk:
+            self._rx_buffer.extend(chunk)
 
-        if line[0] != 0x00 or line[1] != 0x55:
-            # not synced to bytestream, wait for 0x00 0x55
-            self.log.debug(
-                f"in < {line[0]:02x} {line[1]:02x} not a proper sync -wait for sync-"
-            )
-            return
+        while True:
+            sync_index = self._rx_buffer.find(0x55)
+            if sync_index == -1:
+                # no sync byte anywhere in the buffer - it's all noise
+                self._rx_buffer.clear()
+                return
 
-        # check parity
-        raw_pid = line[2]
-        try:
-            pid = self.check_pid_parity(raw_pid)
-        except self.ChecksumError as e:
-            self.log.debug(f"in < {format_bytes(line)} PID parity error")
-            return
+            if len(self._rx_buffer) < sync_index + 2:
+                # sync byte found, but the PID byte hasn't arrived yet
+                del self._rx_buffer[:sync_index]
+                return
 
-        # pid is only the lower 6 bits
-        pid = raw_pid & 0x3F
+            raw_pid = self._rx_buffer[sync_index + 1]
+            try:
+                pid = self.check_pid_parity(raw_pid)
+            except self.ChecksumError:
+                # coincidental 0x55 in noise/data - drop just that byte and
+                # keep scanning the rest of the buffer for a real sync byte
+                del self._rx_buffer[: sync_index + 1]
+                continue
+
+            # sync byte + parity-valid PID found - treat as synced. The
+            # preceding break byte is a nice-to-have confirmation, not a
+            # hard requirement (its exact byte count on the wire depends on
+            # the UART/driver), so it's only logged, not enforced.
+            if sync_index > 0 and self._rx_buffer[sync_index - 1] != 0x00:
+                self.log.debug(
+                    f"in < resynced on sync+PID parity without a preceding "
+                    f"break byte (saw {self._rx_buffer[sync_index - 1]:02x})"
+                )
+            break
 
         if (pid == Lin.PID_TRANSPORTLAYER_SLAVE2MASTER and self.response_waiting()) or (
             pid in self.protocol.ANSWER_TO_PIDS
         ):
+            # header only - consume up to and including the PID byte
+            del self._rx_buffer[: sync_index + 2]
+
             if active:
                 self.log.debug(
-                    f"in < {format_bytes(line)} → checking if answer required"
+                    f"in < {format_bytes(bytes([0x55, raw_pid]))} → checking if answer required"
                 )
-                self._answer_active(serial, pid, raw_pid)
-                return
+                answered = self._answer_active(serial, pid, raw_pid)
+                if answered:
+                    # the port's input buffer was reset as part of sending
+                    # the answer - the shadow buffer must follow suit
+                    self._rx_buffer.clear()
             else:
                 self.log.debug(
-                    f"in < {format_bytes(line)} → not considering answer (read-only mode)"
+                    f"in < {format_bytes(bytes([0x55, raw_pid]))} → not considering answer (read-only mode)"
                 )
-        else:
-            line += serial.read(9)
-            self.log.debug(f"in < {format_bytes(line)} → processing")
-            self._read_passive(pid, line[2:])
+            return
+
+        # full frame: PID + up to 9 more bytes (payload + checksum)
+        frame_end = sync_index + 2 + 9
+        if len(self._rx_buffer) < frame_end:
+            # header confirmed, but the payload hasn't fully arrived yet -
+            # keep the confirmed header in the buffer and retry next call
+            del self._rx_buffer[:sync_index]
+            return
+
+        line = bytes([raw_pid]) + bytes(self._rx_buffer[sync_index + 2 : frame_end])
+        del self._rx_buffer[:frame_end]
+
+        self.log.debug(f"in < {format_bytes(bytes([0x55]) + line)} → processing")
+        self._read_passive(pid, line)
 
     def _read_passive(self, pid, line):
         if len(line) < 2:
