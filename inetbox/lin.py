@@ -21,8 +21,6 @@ class Lin:
     SID_READ_BY_IDENTIFIER = 0xB2
     NODE_ADDRESS_BROADCAST = 0x7F
 
-    transportlayer_response_buffer = []
-
     class ChecksumError(Exception):
         pass
 
@@ -34,6 +32,10 @@ class Lin:
         # kept across calls to loop_serial so a short/partial read never
         # loses bytes and misalignment can be recovered one byte at a time
         self._rx_buffer = bytearray()
+
+        # instance attribute (not a class attribute!) so multiple Lin
+        # instances never share the same queued-response state
+        self.transportlayer_response_buffer = []
 
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
@@ -182,13 +184,25 @@ class Lin:
         return len(self.transportlayer_response_buffer) > 0
 
     def loop_serial(self, serial: Serial, active):
-        # Pull in whatever bytes are currently available (or wait up to the
-        # configured timeout for at least one) and append them to a
-        # persistent buffer. Using a persistent buffer instead of one-shot
+        # Pull in whatever bytes are currently available and append them to
+        # a persistent buffer. Using a persistent buffer instead of one-shot
         # fixed-size reads means a short/partial read never silently drops
         # bytes, and resync after a misalignment can happen one byte at a
         # time instead of in fixed 3-byte jumps.
-        chunk = serial.read(max(serial.in_waiting, 1))
+        #
+        # Only block waiting for new data (up to the configured timeout)
+        # when the buffer is currently empty. If it already holds leftover
+        # bytes from a previous call - e.g. because several LIN frames
+        # queued up in the UART FIFO while this process was briefly busy -
+        # a blocking read here could stall for the full timeout while an
+        # already-complete frame sits waiting, which is exactly what must
+        # not happen for a frame we need to actively answer within LIN's
+        # response window. In that case just top up with whatever is
+        # already available (non-blocking) and get on with processing it.
+        if self._rx_buffer:
+            chunk = serial.read(serial.in_waiting)
+        else:
+            chunk = serial.read(max(serial.in_waiting, 1))
         if chunk:
             self._rx_buffer.extend(chunk)
 
@@ -354,8 +368,11 @@ class Lin:
         else:
             cs = calculate_checksum(bytes([pid_for_checksum]) + databytes)
         # time.sleep(0.0005)
-        serial.write(databytes)
-        serial.write(bytes([cs]))
+        # single write() call so the response goes out as one contiguous
+        # transmission - on a USB-serial adapter, separate write() calls can
+        # become separate USB transfers with a small gap between them,
+        # which risks making the response look malformed on the bus
+        serial.write(databytes + bytes([cs]))
         serial.flush()
         # read back my own answer
         # serial.read(len(databytes) + 1)
