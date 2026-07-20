@@ -210,7 +210,7 @@ class TrumaCommand:
     def pack(self, data):
         if not self.can_send_updates:
             return None
-
+        
         self.updates_pending = True
         try:
             return self.bitstruct_write.pack(data)
@@ -218,7 +218,7 @@ class TrumaCommand:
             # not all required data in status buffer yet
             self.can_send_updates = False
             return None
-
+        
     @property
     def cid_write(self):
         return self.cid - 1
@@ -589,7 +589,9 @@ class InetboxApp:
         self.status["_command_counter"] = (self.status["_command_counter"] + 1) % 0xFF
 
         # get current status buffer contents as dict
-        binary_buffer_contents = command.pack({**self.status, **self.updates_to_send})
+        binary_buffer_contents = command.pack(
+            {**self.status, **self.updates_to_send}
+        )
         if binary_buffer_contents is None:
             self.log.debug("Not all required data in status buffer yet.")
             return None

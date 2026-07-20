@@ -233,7 +233,13 @@ There are three ways to update the clock on the Truma panel:
 - **Automatically, externally triggered:** Send any message to `service/truma/update_time` to update the time on the Truma panel to the current system time of the platform running the service. If needed, the timezone can be overridden by using the setting `timezone_override` in the service settings to a valid timezone name (e.g., `Europe/Berlin`).
 - **Automatically, every 24 hours:** Set the setting `set_time` to `true` in the service settings to update the time on the Truma panel to the current system time every 24 hours.
 
-Alternatively, you can 
+### Frost Protection
+
+This software implements a feature that helps with implementing frost protection. By default, the Truma settings allow a minimum room temperature of 5°C. This means that the heating will turn on even if the temperatures stay well above 0°C. While it is easy to set the heating based on external sensors via an MQTT message, care must be taken not to overwrite an existing, potentially higher target room temperature, and to restore the original setting after the sensor values are back to normal.
+
+By sending `on` to `service/truma/extras/frost_protection/set`, the software will set the target room temperature to 5°C and the heating mode to `eco` **unless a higher target room temperature is already set**. The temperature is configurable via the `frost_protection_temp_room` setting in the `miqro.yml` file.
+
+Send `off` to `service/truma/extras/frost_protection/set` to restore the original target room temperature and heating mode or turn the heating off if it was off previously.
 
 ### Service Settings
 
@@ -241,6 +247,7 @@ The following service-specific settings can be used in the `miqro.yml` file besi
 
 - `default_target_temp_room` (default: 5) - The default target room temperature to set when the heating is enabled, but no target temperature is set.
 - `default_heating_mode` (default: 'eco' or, if a language is specified, the respective translation) - The default heating mode to set when the target temperature is set to a value greater than 5°C, but no heating mode is set.
+- `frost_protection_temp_room` (default: 5) - The target room temperature to set when the frost protection is enabled.
 - `updates_buffer_time` (default: 1) - The time in seconds to wait for more setting changes before applying them. This is useful when multiple settings need to be changed together.
 - `set_time` (default: False) - Automatically set the time on the Truma panel to the current system time every 24 hours.
 - `timezone_override` (default: None) - The timezone to use for setting the time on the Truma panel. If not set, the system timezone is used.

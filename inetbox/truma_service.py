@@ -30,6 +30,9 @@ class TrumaService(miqro.Service):
     last_update_buffer_change = None
     started_commit_updates = None
     last_target_temp_room = None
+    frost_protection = False
+
+    frost_protection_heating_enabled_before = False
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
@@ -61,6 +64,9 @@ class TrumaService(miqro.Service):
 
         self.truma_default_target_temp_room = self.service_config.get(
             "default_target_temp_room", self.TRUMA_DEFAULT_TEMP
+        )
+        self.truma_frost_protection_temp_room = self.service_config.get(
+            "frost_protection_target_temp_room", self.TRUMA_MIN_TEMP
         )
 
         # Allow setting a log directory from environment (command line) or configuration file.
@@ -319,13 +325,13 @@ class TrumaService(miqro.Service):
         _ = TRANSLATIONS_STATES[self.lang]["update_status"]
         if self.last_update_buffer_change is not None:
             if not self.inetapp.can_send_updates():
-                status = _["waiting_for_cp_plus"]
+                status = "waiting_for_cp_plus"
             else:
                 status = _["waiting_commit"]
         elif self.inetapp.updates_to_send:
-            status = _["waiting_truma"]
+            status = "waiting_truma"
         elif self.inetapp.updates_pending():
-            status = _["waiting_truma"]
+            status = "waiting_truma"
         else:
             status = _["idle"]
             self.started_commit_updates = None
@@ -341,7 +347,7 @@ class TrumaService(miqro.Service):
 
         self.publish("cp_plus_status", status, only_if_changed=timedelta(seconds=60))
 
-    @miqro.handle("update_time")
+    @miqro.handle("extras/update_time")
     def handle_update_time(self, msg):
         self.set_time()
 
@@ -356,7 +362,6 @@ class TrumaService(miqro.Service):
 
     def set_time(self):
         current_time = datetime.now()
-
         if not self.service_config.get("timezone_override", None):
             self.log.info(
                 f"Setting time to {current_time} (no timezone override configured in settings)"
@@ -522,6 +527,42 @@ class TrumaService(miqro.Service):
             suggested_display_precision=1,
             state_class="measurement",
         )
+
+    @miqro.handle("extras/frost_protection/set")
+    def handle_frost_protection_set(self, msg):
+        if msg in ["on", "ON", "true", "1"]:
+            self.frost_protection_heating_enabled_before = self.inetapp.get_status(
+                "heating_mode", "off"
+            ) in ["eco", "boost"]
+            self.frost_protection = True
+        else:
+            self.frost_protection = False
+            # if the heating was not enabled before, switch it off again
+            if not self.frost_protection_heating_enabled_before:
+                self.inetapp.set_status("heating_mode", "off")
+                self.inetapp.set_status("target_temp_room", "0")
+                self.log.info(
+                    "Frost protection disabled: Setting heating mode to 'off' and target temperature to 0°C"
+                )
+
+    @miqro.loop(minutes=5)
+    def check_frost_protection(self):
+        if not self.frost_protection:
+            return
+
+        # check if heating is enabled
+        enabled = self.inetapp.get_status("heating_mode", "off") in ["eco", "boost"]
+
+        if not enabled:
+            self.inetapp.set_status("heating_mode", "eco")
+            self.inetapp.set_status(
+                "target_temp_room", self.truma_frost_protection_temp_room
+            )
+            self.log.info(
+                f"Frost protection: Setting heating mode to 'eco' and target temperature to {self.truma_frost_protection_temp_room}°C"
+            )
+        else:
+            self.log.info("Frost protection: Heating already enabled")
 
 
 def run():
