@@ -276,7 +276,10 @@ class Lin:
             else:
                 self.check_checksum(line[0:])
         except self.ChecksumError as e:
-            self.log.warning(f"→ → checksum error: {e}")
+            self.log.warning(
+                f"→ → checksum error on pid {pid:02x} ({len(line)} bytes "
+                f"incl. pid): {e} - frame was {format_bytes(line)}"
+            )
             return
 
         if pid == self.PID_TRANSPORTLAYER_MASTER2SLAVE:
