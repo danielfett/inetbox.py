@@ -184,39 +184,49 @@ class Lin:
         return len(self.transportlayer_response_buffer) > 0
 
     def loop_serial(self, serial: Serial, active):
-        # Pull in whatever bytes are currently available and append them to
-        # a persistent buffer. Using a persistent buffer instead of one-shot
-        # fixed-size reads means a short/partial read never silently drops
-        # bytes, and resync after a misalignment can happen one byte at a
-        # time instead of in fixed 3-byte jumps.
-        #
-        # Only block waiting for new data (up to the configured timeout)
-        # when the buffer is currently empty. If it already holds leftover
-        # bytes from a previous call - e.g. because several LIN frames
-        # queued up in the UART FIFO while this process was briefly busy -
-        # a blocking read here could stall for the full timeout while an
-        # already-complete frame sits waiting, which is exactly what must
-        # not happen for a frame we need to actively answer within LIN's
-        # response window. In that case just top up with whatever is
-        # already available (non-blocking) and get on with processing it.
-        if self._rx_buffer:
-            chunk = serial.read(serial.in_waiting)
-        else:
-            chunk = serial.read(max(serial.in_waiting, 1))
+        # First, try to make progress with whatever is already buffered
+        # from a previous call, without touching the serial port at all.
+        # This handles the case where several LIN frames queued up in the
+        # UART FIFO while this process was briefly busy elsewhere: if a
+        # complete frame - or one we must actively answer - is already
+        # sitting in the buffer, it gets handled immediately instead of
+        # first going through a read that could block.
+        if self._process_buffer(serial, active):
+            return
+
+        # Nothing in the buffer is resolvable yet - block (up to the
+        # configured timeout) waiting for more data. This blocking read is
+        # also what paces this otherwise-unthrottled polling loop
+        # (TrumaService's own loop has no sleep of its own), so a genuine
+        # "need more bytes" case must actually wait here rather than spin:
+        # skipping this wait whenever the buffer is merely non-empty - as
+        # opposed to actionable - previously caused a tight, unpaced busy
+        # loop (100% CPU, MQTT starved) whenever a header's payload never
+        # fully arrived (e.g. real bus noise or the master going quiet).
+        chunk = serial.read(max(serial.in_waiting, 1))
         if chunk:
             self._rx_buffer.extend(chunk)
+            self._process_buffer(serial, active)
 
+    def _process_buffer(self, serial: Serial, active) -> bool:
+        """Try to resolve the next outcome from self._rx_buffer alone.
+
+        Returns True if it made progress (processed/dropped something) and
+        the caller does not need to wait for more data. Returns False if
+        the buffer doesn't yet contain enough to decide anything, meaning
+        the caller should block waiting for more bytes.
+        """
         while True:
             sync_index = self._rx_buffer.find(0x55)
             if sync_index == -1:
                 # no sync byte anywhere in the buffer - it's all noise
                 self._rx_buffer.clear()
-                return
+                return False
 
             if len(self._rx_buffer) < sync_index + 2:
                 # sync byte found, but the PID byte hasn't arrived yet
                 del self._rx_buffer[:sync_index]
-                return
+                return False
 
             raw_pid = self._rx_buffer[sync_index + 1]
             try:
@@ -257,7 +267,7 @@ class Lin:
                 self.log.debug(
                     f"in < {format_bytes(bytes([0x55, raw_pid]))} → not considering answer (read-only mode)"
                 )
-            return
+            return True
 
         # The transport-layer "slave -> master" poll (and, defensively, its
         # "master -> slave" counterpart) may legitimately go unanswered -
@@ -288,21 +298,23 @@ class Lin:
                     f"in < pid {pid:02x} header went unanswered (no data field) → dropping"
                 )
                 del self._rx_buffer[: sync_index + 2]
-                return
+                return True
 
         # full frame: PID + up to 9 more bytes (payload + checksum)
         frame_end = sync_index + 2 + 9
         if len(self._rx_buffer) < frame_end:
             # header confirmed, but the payload hasn't fully arrived yet -
-            # keep the confirmed header in the buffer and retry next call
+            # keep the confirmed header in the buffer and let the caller
+            # wait for more data
             del self._rx_buffer[:sync_index]
-            return
+            return False
 
         line = bytes([raw_pid]) + bytes(self._rx_buffer[sync_index + 2 : frame_end])
         del self._rx_buffer[:frame_end]
 
         self.log.debug(f"in < {format_bytes(bytes([0x55]) + line)} → processing")
         self._read_passive(pid, line)
+        return True
 
     def _read_passive(self, pid, line):
         if len(line) < 2:
