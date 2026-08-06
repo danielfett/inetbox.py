@@ -13,7 +13,50 @@ from datetime import timedelta, datetime
 import logging
 import logging.handlers
 from dateutil.tz import gettz
+from time import sleep
 import sys
+
+
+class DeviceWithCPPlusAvailability(ha_sensors.Device):
+    """Device that is only available while the CP Plus is actually talking.
+
+    miqro advertises exactly one availability topic, the service's LWT, which
+    only reports whether this process is alive. That is not enough here: when
+    the LIN side goes quiet the service keeps running happily, and Home
+    Assistant keeps showing the last received temperatures as if they were
+    current. Adding a second availability topic and requiring both ("all")
+    makes every entity of this device go unavailable instead.
+
+    The discovery payload is built by miqro and only extended here, rather
+    than reassembled, so that future additions to it are picked up
+    automatically.
+    """
+
+    def publish_discovery(self, prefix):
+        captured = {}
+
+        def capture(topic, payload, **kwargs):
+            captured.update(topic=topic, payload=payload, kwargs=kwargs)
+
+        publish_json = self.service.publish_json
+        self.service.publish_json = capture
+        try:
+            super().publish_discovery(prefix)
+        finally:
+            # instance attribute shadowing the bound method - remove it again
+            del self.service.publish_json
+
+        payload = captured["payload"]
+        payload["availability"].append(
+            {
+                "topic": self.service.data_topic_prefix
+                + self.service.LIN_AVAILABILITY_TOPIC,
+                "payload_available": "1",
+                "payload_not_available": "0",
+            }
+        )
+        payload["availability_mode"] = "all"
+        publish_json(captured["topic"], payload, **captured["kwargs"])
 
 
 class TrumaService(miqro.Service):
@@ -25,6 +68,27 @@ class TrumaService(miqro.Service):
     TRUMA_DEFAULT_TEMP = 5
     TRUMA_MAX_TIMEDELTA = timedelta(minutes=1)
     MAX_UPDATE_WAIT = timedelta(seconds=60)
+
+    # A serial port can stop delivering data while remaining perfectly open:
+    # read() keeps returning b"" and never raises, so nothing below notices.
+    # After this much uninterrupted silence, assume the port rather than the
+    # bus is at fault and reopen it. Configurable because a bus that is
+    # legitimately quiet for longer would otherwise be reopened needlessly.
+    SERIAL_REOPEN_AFTER = 60.0
+    # Pace retries while the device node is unavailable, and eventually let
+    # systemd (Restart=always) give us a clean process instead.
+    SERIAL_REOPEN_RETRY_INTERVAL = 2.0
+    SERIAL_REOPEN_MAX_FAILURES = 5
+
+    # How long the CP Plus may stay silent before this service reports itself
+    # as out of contact - see LIN_AVAILABILITY_TOPIC.
+    CP_PLUS_TIMEOUT = 120.0
+
+    # Second Home Assistant availability topic, next to miqro's own LWT. The
+    # LWT only says that this process is alive, which stays true while the LIN
+    # side is dead - Home Assistant would then keep presenting the last known
+    # temperatures as current instead of marking the entities unavailable.
+    LIN_AVAILABILITY_TOPIC = "cp_plus_available"
 
     updates_buffer = {}
     last_update_buffer_change = None
@@ -92,12 +156,29 @@ class TrumaService(miqro.Service):
 
         self.inetapp = InetboxApp(debug_app, self.lang)
         self.inetprotocol = InetboxLINProtocol(self.inetapp, debug_protocol)
-        serial_device = self.service_config.get("serial_device", "/dev/serial0")
-        baudrate = self.service_config.get("baudrate", 9600)
-        timeout = self.service_config.get("timeout", 0.03)
-        self.log.info(f"Opening serial device {serial_device} in exclusive mode")
-        self.serial = Serial(serial_device, baudrate, timeout=timeout, exclusive=True)
+        self.serial_device = self.service_config.get("serial_device", "/dev/serial0")
+        self.baudrate = self.service_config.get("baudrate", 9600)
+        self.serial_timeout = self.service_config.get("timeout", 0.03)
+        self.serial_reopen_after = self.service_config.get(
+            "serial_reopen_after", self.SERIAL_REOPEN_AFTER
+        )
+        self.cp_plus_timeout = self.service_config.get(
+            "cp_plus_timeout", self.CP_PLUS_TIMEOUT
+        )
+        self.serial_reopen_failures = 0
+        # None so that the first evaluation always logs the initial state
+        self._was_in_contact = None
+        self.serial = self._open_serial()
         self.lin = Lin(self.inetprotocol, debug_lin)
+
+    def _open_serial(self):
+        self.log.info(f"Opening serial device {self.serial_device} in exclusive mode")
+        return Serial(
+            self.serial_device,
+            self.baudrate,
+            timeout=self.serial_timeout,
+            exclusive=True,
+        )
 
     def _loop_step(self):
         assert self.LOOPS is not None
@@ -106,7 +187,54 @@ class TrumaService(miqro.Service):
             for loop in self.LOOPS:
                 loop.run_if_needed(self)
 
+        if not self._serial_is_alive():
+            # no usable port - pace the retries, because loop_serial's
+            # blocking read is what normally throttles this loop
+            sleep(self.SERIAL_REOPEN_RETRY_INTERVAL)
+            return
+
         self.lin.loop_serial(self.serial, True)
+
+    def _serial_is_alive(self):
+        """Reopen the serial port if it has gone silent for too long.
+
+        Returns False when there is currently no usable port, in which case
+        the caller must not touch self.serial.
+        """
+        if (
+            self.serial.is_open
+            and self.lin.seconds_since_last_rx() < self.serial_reopen_after
+        ):
+            return True
+
+        if self.serial.is_open:
+            self.log.warning(
+                f"No data from {self.serial_device} for "
+                f"{self.lin.seconds_since_last_rx():.1f}s - reopening the port"
+            )
+            try:
+                self.serial.close()
+            except Exception as e:
+                self.log.warning(f"Error closing {self.serial_device}: {e}")
+
+        try:
+            self.serial = self._open_serial()
+        except Exception as e:
+            self.serial_reopen_failures += 1
+            self.log.error(
+                f"Could not reopen {self.serial_device} (attempt "
+                f"{self.serial_reopen_failures}/{self.SERIAL_REOPEN_MAX_FAILURES}): {e}"
+            )
+            if self.serial_reopen_failures >= self.SERIAL_REOPEN_MAX_FAILURES:
+                self.log.error("Giving up on the serial port, exiting for a restart")
+                sys.exit(1)
+            return False
+
+        self.serial_reopen_failures = 0
+        # everything buffered predates the reconnect and must not be reused
+        self.lin.reset_receive_state()
+        self.log.info(f"Reopened {self.serial_device}")
+        return True
 
     @miqro.loop(seconds=0.5)
     def send_status(self):
@@ -287,7 +415,7 @@ class TrumaService(miqro.Service):
             self.updates_buffer["wall_time_minutes"] = minutes
             self.updates_buffer["wall_time_seconds"] = seconds
 
-        if not self.inetapp.can_send_updates:
+        if not self.inetapp.can_send_updates():
             msg = "Cannot send updates to inetapp, no status received from CP Plus yet. Changes will be delayed until status received."
             self.log.error(msg)
             self.publish("error", msg)
@@ -325,22 +453,57 @@ class TrumaService(miqro.Service):
         _ = TRANSLATIONS_STATES[self.lang]["update_status"]
         if self.last_update_buffer_change is not None:
             if not self.inetapp.can_send_updates():
-                status = "waiting_for_cp_plus"
+                status = _["waiting_for_cp_plus"]
             else:
                 status = _["waiting_commit"]
         elif self.inetapp.updates_to_send:
-            status = "waiting_truma"
+            status = _["waiting_truma"]
         elif self.inetapp.updates_pending():
-            status = "waiting_truma"
+            status = _["waiting_truma"]
         else:
             status = _["idle"]
             self.started_commit_updates = None
         self.publish("update_status", status, only_if_changed=timedelta(seconds=60))
 
+    def cp_plus_in_contact(self):
+        """True while the CP Plus is sending us status data.
+
+        Used both for the Home Assistant availability topic and for the
+        cp_plus_status sensor, so that the two can never disagree.
+        """
+        silence = self.inetapp.seconds_since_status_update()
+        return silence is not None and silence < self.cp_plus_timeout
+
+    @miqro.loop(seconds=1)
+    def send_availability(self):
+        in_contact = self.cp_plus_in_contact()
+
+        if in_contact != self._was_in_contact:
+            silence = self.inetapp.seconds_since_status_update()
+            if in_contact:
+                self.log.info("CP Plus is back in contact")
+            elif silence is None:
+                self.log.warning("No status data from the CP Plus yet")
+            else:
+                self.log.warning(
+                    f"No status data from the CP Plus for {silence:.0f}s - "
+                    f"reporting the Truma device as unavailable"
+                )
+            self._was_in_contact = in_contact
+
+        # retained, so Home Assistant sees the last known state immediately
+        # when it (re)starts; republished at least once a minute
+        self.publish(
+            self.LIN_AVAILABILITY_TOPIC,
+            "1" if in_contact else "0",
+            retain=True,
+            only_if_changed=timedelta(seconds=60),
+        )
+
     @miqro.loop(seconds=0.3)
     def send_cp_plus_status(self):
         _ = TRANSLATIONS_STATES[self.lang]["cp_plus_status"]
-        if self.inetapp.can_send_updates:
+        if self.cp_plus_in_contact():
             status = _["online"]
         else:
             status = _["waiting"]
@@ -403,7 +566,7 @@ class TrumaService(miqro.Service):
     def create_ha_sensors(self):
         _ = lambda s: TRANSLATIONS_HA_SENSOR_NAMES[self.lang].get(s, s)
 
-        dev = ha_sensors.Device(
+        dev = DeviceWithCPPlusAvailability(
             self,
             name=_("Truma Device"),
             manufacturer="Truma",

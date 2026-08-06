@@ -1,4 +1,5 @@
 import logging
+import time
 from .tools import format_bytes, calculate_checksum
 from serial import Serial
 
@@ -6,6 +7,27 @@ from serial import Serial
 class Lin:
     PID_TRANSPORTLAYER_MASTER2SLAVE = 0x3C
     PID_TRANSPORTLAYER_SLAVE2MASTER = 0x3D
+
+    # A quiet LIN bus and a serial port that has silently stopped delivering
+    # bytes are indistinguishable from in here - read() just keeps returning
+    # b"" in both cases, without ever raising. The only thing that separates
+    # them is how long the silence lasts, so keep track of that and complain
+    # about it; the caller decides what to do about it (see
+    # seconds_since_last_rx).
+    SILENCE_WARN_SECONDS = 5.0
+    SILENCE_REPEAT_SECONDS = 60.0
+
+    # How often to summarise bytes that could not be synchronized to a frame.
+    # Reported separately from the silence above so that "nothing arrives" and
+    # "only garbage arrives" can be told apart in the log.
+    DISCARD_REPORT_SECONDS = 10.0
+
+    # A queued transport-layer response is only meaningful for the poll it was
+    # prepared for. If no poll collects it within this long, the master has
+    # moved on and sending it later would answer the wrong request - and,
+    # because the caller suspends its other work while a response is pending,
+    # a response that is never collected would stall the whole service.
+    RESPONSE_MAX_AGE_SECONDS = 5.0
 
     SERVICE_ID_MAPPING = {
         0xB0: "Assign NAD",
@@ -36,6 +58,18 @@ class Lin:
         # instance attribute (not a class attribute!) so multiple Lin
         # instances never share the same queued-response state
         self.transportlayer_response_buffer = []
+
+        # receive watchdog state, see SILENCE_WARN_SECONDS
+        self._last_rx_time = time.monotonic()
+        self._silence_logged_at = None
+
+        # bytes dropped by the resync logic since _discard_window_start
+        self._discarded_bytes = 0
+        self._discard_window_start = time.monotonic()
+
+        # when the response buffer last made progress, see
+        # RESPONSE_MAX_AGE_SECONDS
+        self._response_progress_at = time.monotonic()
 
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
@@ -183,7 +217,88 @@ class Lin:
     def response_waiting(self):
         return len(self.transportlayer_response_buffer) > 0
 
+    def seconds_since_last_rx(self):
+        """Seconds since the last byte was read from the serial port.
+
+        The caller uses this to decide whether the port itself has stopped
+        working: a port whose device silently went away keeps a perfectly
+        valid file descriptor, never signals readable and never raises, so
+        the elapsed silence is the only symptom available.
+        """
+        return time.monotonic() - self._last_rx_time
+
+    def reset_receive_state(self):
+        """Drop all buffered receive state and restart the watchdog.
+
+        Called after the serial port has been reopened. Anything still
+        buffered belongs to a frame that is long gone, and a queued
+        transport-layer response would end up answering the wrong poll, so
+        none of it may survive the reconnect.
+        """
+        self._rx_buffer.clear()
+        self.transportlayer_response_buffer.clear()
+        self.protocol.reset_transportlayer_state()
+        self._last_rx_time = time.monotonic()
+        self._silence_logged_at = None
+        self._discarded_bytes = 0
+        self._discard_window_start = time.monotonic()
+        self._response_progress_at = time.monotonic()
+
+    def _check_silence(self):
+        silence = self.seconds_since_last_rx()
+        if silence < self.SILENCE_WARN_SECONDS:
+            return
+
+        now = time.monotonic()
+        if (
+            self._silence_logged_at is not None
+            and now - self._silence_logged_at < self.SILENCE_REPEAT_SECONDS
+        ):
+            return
+
+        self._silence_logged_at = now
+        self.log.warning(
+            f"no data received from the LIN bus for {silence:.1f}s - either the "
+            f"bus is quiet or the serial port has stopped delivering data"
+        )
+
+    def _report_discarded_bytes(self):
+        now = time.monotonic()
+        if not self._discarded_bytes:
+            # nothing dropped yet - the reporting window starts at the first
+            # discarded byte, not at the last report
+            self._discard_window_start = now
+            return
+
+        elapsed = now - self._discard_window_start
+        if elapsed < self.DISCARD_REPORT_SECONDS:
+            return
+
+        self.log.warning(
+            f"discarded {self._discarded_bytes} byte(s) in {elapsed:.1f}s that "
+            f"could not be synchronized to a LIN frame"
+        )
+        self._discarded_bytes = 0
+        self._discard_window_start = now
+
+    def _expire_stale_responses(self):
+        if not self.response_waiting():
+            return
+        age = time.monotonic() - self._response_progress_at
+        if age < self.RESPONSE_MAX_AGE_SECONDS:
+            return
+
+        self.log.warning(
+            f"dropping {len(self.transportlayer_response_buffer)} queued "
+            f"transport-layer response(s) that were not collected for {age:.1f}s"
+        )
+        self.transportlayer_response_buffer.clear()
+        self._response_progress_at = time.monotonic()
+
     def loop_serial(self, serial: Serial, active):
+        self._report_discarded_bytes()
+        self._expire_stale_responses()
+
         # First, try to make progress with whatever is already buffered
         # from a previous call, without touching the serial port at all.
         # This handles the case where several LIN frames queued up in the
@@ -205,8 +320,12 @@ class Lin:
         # fully arrived (e.g. real bus noise or the master going quiet).
         chunk = serial.read(max(serial.in_waiting, 1))
         if chunk:
+            self._last_rx_time = time.monotonic()
+            self._silence_logged_at = None
             self._rx_buffer.extend(chunk)
             self._process_buffer(serial, active)
+        else:
+            self._check_silence()
 
     def _process_buffer(self, serial: Serial, active) -> bool:
         """Try to resolve the next outcome from self._rx_buffer alone.
@@ -220,11 +339,13 @@ class Lin:
             sync_index = self._rx_buffer.find(0x55)
             if sync_index == -1:
                 # no sync byte anywhere in the buffer - it's all noise
+                self._discarded_bytes += len(self._rx_buffer)
                 self._rx_buffer.clear()
                 return False
 
             if len(self._rx_buffer) < sync_index + 2:
                 # sync byte found, but the PID byte hasn't arrived yet
+                self._discarded_bytes += sync_index
                 del self._rx_buffer[:sync_index]
                 return False
 
@@ -234,6 +355,7 @@ class Lin:
             except self.ChecksumError:
                 # coincidental 0x55 in noise/data - drop just that byte and
                 # keep scanning the rest of the buffer for a real sync byte
+                self._discarded_bytes += sync_index + 1
                 del self._rx_buffer[: sync_index + 1]
                 continue
 
@@ -306,6 +428,7 @@ class Lin:
             # header confirmed, but the payload hasn't fully arrived yet -
             # keep the confirmed header in the buffer and let the caller
             # wait for more data
+            self._discarded_bytes += sync_index
             del self._rx_buffer[:sync_index]
             return False
 
@@ -392,10 +515,14 @@ class Lin:
         self.log.debug("out > " + format_bytes(databytes + bytes([cs])))
 
     def prepare_transportlayer_response(self, messages):
+        if not self.response_waiting():
+            self._response_progress_at = time.monotonic()
         self.transportlayer_response_buffer += messages
 
     def _answer_transportlayer_request(self):
         if self.response_waiting():
+            # the queue is being drained as intended - restart the age clock
+            self._response_progress_at = time.monotonic()
             return self.transportlayer_response_buffer.pop(0)
         else:
             # self.log.warning("No messages in transportlayer response buffer.")

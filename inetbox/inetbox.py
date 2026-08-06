@@ -1,6 +1,7 @@
 from datetime import datetime
 from decimal import Decimal
 import logging
+import time
 from .lin import Lin
 from .tools import format_bytes, calculate_checksum
 from . import conversions as cnv
@@ -22,6 +23,18 @@ class InetboxLINProtocol:
         self.log = logging.getLogger("inet.protocol")
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
+
+    def reset_transportlayer_state(self):
+        """Discard a partially received multi-frame request.
+
+        Called when the serial connection was reestablished: the remaining
+        frames of an in-flight transfer are gone for good, and appending the
+        next transfer's frames to the leftovers would silently produce a
+        garbage status buffer.
+        """
+        self.transportlayer_received_request_sid = None
+        self.transportlayer_received_request_payload = None
+        self.transportlayer_received_request_expected_bytes = None
 
     def receive_transportlayer_frame(
         self, lin: Lin, frame_type, expected_bytes, sid, payload
@@ -428,8 +441,21 @@ class InetboxApp:
     def __init__(self, debug, lang):
         self.lang = lang
         self.log = logging.getLogger("inet.app")
+
+        # monotonic timestamp of the last valid status buffer received from
+        # the CP Plus, or None while we have never heard from it. This is
+        # what "are we actually in contact" means for this service - the
+        # serial port staying open says nothing about it.
+        self._last_status_update = None
+
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
+
+    def seconds_since_status_update(self):
+        """Seconds since the last valid status buffer, or None if never."""
+        if self._last_status_update is None:
+            return None
+        return time.monotonic() - self._last_status_update
 
     def map_or_debug(self, mapping, value):
         if value in mapping:
@@ -528,6 +554,11 @@ class InetboxApp:
                 f"Status buffer does not start with preamble, expected {self.STATUS_BUFFER_PREAMBLE}, got {status_buffer[:len(self.STATUS_BUFFER_PREAMBLE)]}"
             )
             return
+
+        # a well-formed buffer means the CP Plus is talking to us - record
+        # this before parsing, so that buffer types we cannot decode still
+        # count as contact
+        self._last_status_update = time.monotonic()
 
         # after the preamble, there's a two-byte header defining the length and type of buffer
         header = (command_len, command_id) = status_buffer[

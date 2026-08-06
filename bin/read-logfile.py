@@ -4,6 +4,24 @@ import sys
 from inetbox import *
 import logging
 
+
+class BufferAsSerial:
+    """Minimal serial.Serial stand-in over an in-memory buffer.
+
+    Lin.loop_serial sizes its read from serial.in_waiting, which a plain
+    BytesIO does not offer.
+    """
+
+    def __init__(self, data):
+        self._buffer = io.BytesIO(data)
+        self.in_waiting = len(data)
+
+    def read(self, size):
+        data = self._buffer.read(size)
+        self.in_waiting -= len(data)
+        return data
+
+
 if __name__ == "__main__":
     parser = argparse.ArgumentParser()
     # can be called with file to read from, or reads froms serial
@@ -24,7 +42,7 @@ if __name__ == "__main__":
     )
     # logging.getLogger().addHandler(logging.StreamHandler())
 
-    inetapp = InetboxApp(True)
+    inetapp = InetboxApp(True, "none")
     inetprotocol = InetboxLINProtocol(inetapp, True)
     lin = Lin(inetprotocol, True)
 
@@ -35,6 +53,8 @@ if __name__ == "__main__":
                 continue
             line_parts = line.split()
             data_bytes = bytes(int(x, 16) for x in line_parts[args.first : args.last])
-            # create BytesIO buffer to simulate serial input
-            with io.BytesIO(bytes([0x00, 0x55]) + data_bytes) as f:
-                lin.loop_serial(f, False)
+            # simulate serial input, and keep feeding it to the LIN layer
+            # until it has consumed the whole frame
+            fake_serial = BufferAsSerial(bytes([0x00, 0x55]) + data_bytes)
+            while fake_serial.in_waiting:
+                lin.loop_serial(fake_serial, False)
