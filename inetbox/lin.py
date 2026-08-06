@@ -22,6 +22,12 @@ class Lin:
     # "only garbage arrives" can be told apart in the log.
     DISCARD_REPORT_SECONDS = 10.0
 
+    # The break condition preceding every sync byte reaches us as one or more
+    # 0x00 bytes; how many depends on the UART/driver and the master's break
+    # length. Used both to recognise the next frame's header and to keep the
+    # break out of the discarded-byte statistics.
+    MAX_BREAK_BYTES = 4
+
     # A queued transport-layer response is only meaningful for the poll it was
     # prepared for. If no poll collects it within this long, the master has
     # moved on and sending it later would answer the wrong request - and,
@@ -262,6 +268,23 @@ class Lin:
             f"bus is quiet or the serial port has stopped delivering data"
         )
 
+    def _count_discarded(self, data):
+        """Account for bytes dropped while resyncing, ignoring the break.
+
+        Every frame is preceded by a break, so dropping a short run of
+        leading 0x00 bytes is the normal course of events and must not be
+        reported: a healthy bus splits frames across reads all the time,
+        which would otherwise produce a continuous stream of complaints and
+        drown out the case this is meant to surface. Anything beyond a
+        plausible break - a line stuck dominant, or actual garbage - still
+        counts.
+        """
+        break_bytes = 0
+        while break_bytes < len(data) and data[break_bytes] == 0x00:
+            break_bytes += 1
+
+        self._discarded_bytes += len(data) - min(break_bytes, self.MAX_BREAK_BYTES)
+
     def _report_discarded_bytes(self):
         now = time.monotonic()
         if not self._discarded_bytes:
@@ -320,8 +343,16 @@ class Lin:
         # fully arrived (e.g. real bus noise or the master going quiet).
         chunk = serial.read(max(serial.in_waiting, 1))
         if chunk:
+            if self._silence_logged_at is not None:
+                # report the recovery too - otherwise a gap that healed by
+                # itself is indistinguishable in the log from one that never
+                # did, and the length of the gap is the interesting part
+                self.log.warning(
+                    f"LIN bus data resumed after {self.seconds_since_last_rx():.1f}s "
+                    f"of silence"
+                )
+                self._silence_logged_at = None
             self._last_rx_time = time.monotonic()
-            self._silence_logged_at = None
             self._rx_buffer.extend(chunk)
             self._process_buffer(serial, active)
         else:
@@ -339,13 +370,13 @@ class Lin:
             sync_index = self._rx_buffer.find(0x55)
             if sync_index == -1:
                 # no sync byte anywhere in the buffer - it's all noise
-                self._discarded_bytes += len(self._rx_buffer)
+                self._count_discarded(self._rx_buffer)
                 self._rx_buffer.clear()
                 return False
 
             if len(self._rx_buffer) < sync_index + 2:
                 # sync byte found, but the PID byte hasn't arrived yet
-                self._discarded_bytes += sync_index
+                self._count_discarded(self._rx_buffer[:sync_index])
                 del self._rx_buffer[:sync_index]
                 return False
 
@@ -355,7 +386,7 @@ class Lin:
             except self.ChecksumError:
                 # coincidental 0x55 in noise/data - drop just that byte and
                 # keep scanning the rest of the buffer for a real sync byte
-                self._discarded_bytes += sync_index + 1
+                self._count_discarded(self._rx_buffer[: sync_index + 1])
                 del self._rx_buffer[: sync_index + 1]
                 continue
 
@@ -406,9 +437,8 @@ class Lin:
             self.PID_TRANSPORTLAYER_MASTER2SLAVE,
             self.PID_TRANSPORTLAYER_SLAVE2MASTER,
         ):
-            MAX_BREAK_BYTES = 4
             probe = sync_index + 2
-            probe_limit = min(len(self._rx_buffer), probe + MAX_BREAK_BYTES)
+            probe_limit = min(len(self._rx_buffer), probe + self.MAX_BREAK_BYTES)
             while probe < probe_limit and self._rx_buffer[probe] == 0x00:
                 probe += 1
             if (
@@ -428,11 +458,15 @@ class Lin:
             # header confirmed, but the payload hasn't fully arrived yet -
             # keep the confirmed header in the buffer and let the caller
             # wait for more data
-            self._discarded_bytes += sync_index
+            self._count_discarded(self._rx_buffer[:sync_index])
             del self._rx_buffer[:sync_index]
             return False
 
         line = bytes([raw_pid]) + bytes(self._rx_buffer[sync_index + 2 : frame_end])
+        # anything ahead of the sync byte is dropped along with the frame -
+        # normally just the break, but account for it so that junk sitting
+        # between otherwise valid frames does not go unnoticed
+        self._count_discarded(self._rx_buffer[:sync_index])
         del self._rx_buffer[:frame_end]
 
         self.log.debug(f"in < {format_bytes(bytes([0x55]) + line)} → processing")
