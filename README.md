@@ -258,6 +258,7 @@ The following service-specific settings can be used in the `miqro.yml` file besi
 - `timeout` (default: 0.03) - The timeout in seconds for reading from the LIN bus. This should not be changed unless you know what you are doing.
 - `serial_reopen_after` (default: 60) - Reopen the serial port after this many seconds without a single byte from the LIN bus. A serial port can stop delivering data while staying open - reads simply return nothing and never raise an error - which otherwise leaves the service silently deaf until it is restarted by hand. Increase this if your bus is regularly quiet for longer than 60 seconds.
 - `cp_plus_timeout` (default: 120) - Report the Truma device as unavailable in Home Assistant after this many seconds without status data from the CP Plus. This prevents Home Assistant from showing the last known temperatures as if they were current when contact has been lost.
+- `lin_silence_warn` (default: 30) - Log a warning after this many seconds without any data from the LIN bus. The CP Plus pauses its schedule while idle, and gaps of around ten seconds between two frames are normal, so lower values will produce warnings during regular operation.
 - `log_dir` (default: None) - The directory to write log files to. If not set, logs are written to stdout.
 - `debug_app` (default: False) - Enable debugging for the application layer.
 - `debug_lin` (default: False) - Enable debugging for the LIN layer.

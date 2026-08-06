@@ -169,7 +169,11 @@ class TrumaService(miqro.Service):
         # None so that the first evaluation always logs the initial state
         self._was_in_contact = None
         self.serial = self._open_serial()
-        self.lin = Lin(self.inetprotocol, debug_lin)
+        self.lin = Lin(
+            self.inetprotocol,
+            debug_lin,
+            silence_warn_seconds=self.service_config.get("lin_silence_warn"),
+        )
 
     def _open_serial(self):
         self.log.info(f"Opening serial device {self.serial_device} in exclusive mode")

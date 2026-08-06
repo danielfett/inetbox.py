@@ -14,13 +14,24 @@ class Lin:
     # them is how long the silence lasts, so keep track of that and complain
     # about it; the caller decides what to do about it (see
     # seconds_since_last_rx).
-    SILENCE_WARN_SECONDS = 5.0
+    #
+    # The CP Plus pauses its schedule while idle - gaps of ten seconds between
+    # two frames are perfectly normal - so this has to sit well above that or
+    # it just narrates an idle bus. It stays below the caller's reopen and
+    # availability timeouts, so the log warns before anything is acted upon.
+    SILENCE_WARN_SECONDS = 30.0
     SILENCE_REPEAT_SECONDS = 60.0
 
-    # How often to summarise bytes that could not be synchronized to a frame.
-    # Reported separately from the silence above so that "nothing arrives" and
-    # "only garbage arrives" can be told apart in the log.
+    # How often to summarise bytes that could not be synchronized to a frame,
+    # and how many have to accumulate before it is worth mentioning. Reported
+    # separately from the silence above so that "nothing arrives" and "only
+    # garbage arrives" can be told apart in the log. The floor exists because
+    # a handful of bytes per window is normal: resetting the input buffer
+    # after transmitting does not reliably swallow the echo of our own answer
+    # on a USB serial adapter, whose bytes are still in flight when the reset
+    # happens.
     DISCARD_REPORT_SECONDS = 10.0
+    DISCARD_REPORT_MIN_BYTES = 64
 
     # The break condition preceding every sync byte reaches us as one or more
     # 0x00 bytes; how many depends on the UART/driver and the master's break
@@ -52,9 +63,12 @@ class Lin:
     class ChecksumError(Exception):
         pass
 
-    def __init__(self, protocol, debug=False):
+    def __init__(self, protocol, debug=False, silence_warn_seconds=None):
         self.protocol = protocol
         self.log = logging.getLogger("inet.lin")
+
+        if silence_warn_seconds is not None:
+            self.SILENCE_WARN_SECONDS = silence_warn_seconds
 
         # persistent receive buffer used to resync to the LIN byte stream;
         # kept across calls to loop_serial so a short/partial read never
@@ -295,6 +309,13 @@ class Lin:
 
         elapsed = now - self._discard_window_start
         if elapsed < self.DISCARD_REPORT_SECONDS:
+            return
+
+        if self._discarded_bytes < self.DISCARD_REPORT_MIN_BYTES:
+            # too few to mean anything - start a fresh window rather than
+            # letting a trickle accumulate into an eventual false alarm
+            self._discarded_bytes = 0
+            self._discard_window_start = now
             return
 
         self.log.warning(
