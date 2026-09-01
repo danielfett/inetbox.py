@@ -13,7 +13,7 @@ from datetime import timedelta, datetime
 import logging
 import logging.handlers
 from dateutil.tz import gettz
-from time import sleep
+from time import monotonic, sleep
 import sys
 
 
@@ -27,47 +27,41 @@ class DeviceWithCPPlusAvailability(ha_sensors.Device):
     current. Adding a second availability topic and requiring both ("all")
     makes every entity of this device go unavailable instead.
 
-    The discovery payload is built by miqro and only extended here, rather
-    than reassembled, so that future additions to it are picked up
-    automatically.
+    Only the two pieces that differ are overridden, so that future additions
+    to the discovery payload are picked up automatically.
     """
 
-    def publish_discovery(self, prefix):
-        captured = {}
-
-        def capture(topic, payload, **kwargs):
-            captured.update(topic=topic, payload=payload, kwargs=kwargs)
-
-        publish_json = self.service.publish_json
-        self.service.publish_json = capture
-        try:
-            super().publish_discovery(prefix)
-        finally:
-            # instance attribute shadowing the bound method - remove it again
-            del self.service.publish_json
-
-        payload = captured["payload"]
-        payload["availability"].append(
+    def build_availability(self):
+        return super().build_availability() + [
             {
                 "topic": self.service.data_topic_prefix
                 + self.service.LIN_AVAILABILITY_TOPIC,
                 "payload_available": "1",
                 "payload_not_available": "0",
             }
-        )
+        ]
+
+    def build_discovery_payload(self):
+        payload = super().build_discovery_payload()
+        # both topics have to say "available", not either one of them
         payload["availability_mode"] = "all"
-        publish_json(captured["topic"], payload, **captured["kwargs"])
+        return payload
 
 
 class TrumaService(miqro.Service):
     SERVICE_NAME = "truma"
-    LOOP_INTERVAL = 0.001
     VALUE_UPDATE_MAX_INTERVAL = timedelta(minutes=2)
 
     TRUMA_MIN_TEMP = 5
     TRUMA_DEFAULT_TEMP = 5
     TRUMA_MAX_TIMEDELTA = timedelta(minutes=1)
-    MAX_UPDATE_WAIT = timedelta(seconds=60)
+    # How long an update may stay in flight before we stop waiting for it. The
+    # round trip has to fit a 0x18 poll (up to ~12s away while the CP Plus is
+    # in standby), the CP Plus collecting the upload, and - previously - the
+    # CP Plus spontaneously re-sending a buffer of the same type, which is not
+    # bounded at all. 60s was not enough for that, and the reaction was to kill
+    # the process.
+    MAX_UPDATE_WAIT = timedelta(seconds=300)
 
     # A serial port can stop delivering data while remaining perfectly open:
     # read() keeps returning b"" and never raises, so nothing below notices.
@@ -80,6 +74,14 @@ class TrumaService(miqro.Service):
     SERIAL_REOPEN_RETRY_INTERVAL = 2.0
     SERIAL_REOPEN_MAX_FAILURES = 5
 
+    # How long _wait_for_work keeps pumping the bus while a transport-layer
+    # response is still queued. Long enough for the CP Plus to collect a
+    # seven-frame upload, short enough that a CP Plus which goes quiet
+    # mid-transfer - it stays silent for ~12s at a time in standby - cannot
+    # stall MQTT dispatch, which miqro counts as a failure after
+    # INCOMING_STALL_WARN_SECONDS.
+    RESPONSE_PUMP_MAX_SECONDS = 1.0
+
     # How long the CP Plus may stay silent before this service reports itself
     # as out of contact - see LIN_AVAILABILITY_TOPIC.
     CP_PLUS_TIMEOUT = 120.0
@@ -90,16 +92,29 @@ class TrumaService(miqro.Service):
     # temperatures as current instead of marking the entities unavailable.
     LIN_AVAILABILITY_TOPIC = "cp_plus_available"
 
-    updates_buffer = {}
-    last_update_buffer_change = None
-    started_commit_updates = None
-    last_target_temp_room = None
-    frost_protection = False
-
-    frost_protection_heating_status_before = {}
-
     def __init__(self, *args, **kwargs):
+        if not hasattr(miqro.Service, "_wait_for_work"):
+            # This service does all of its work from _wait_for_work(), which
+            # older miqro versions never call - the LIN bus would then simply
+            # never be read, with the service otherwise looking perfectly
+            # healthy. Refuse to start rather than run deaf and blind.
+            raise RuntimeError(
+                "The installed miqro has no Service._wait_for_work(); this "
+                "service would never read the LIN bus. Install miqro 1.4.0 "
+                "or newer."
+            )
+
         super().__init__(*args, **kwargs)
+
+        # Per-instance state. As class attributes, `self.updates_buffer = {}`
+        # in commit_updates silently switched from the shared class dict to an
+        # instance dict partway through the process lifetime.
+        self.updates_buffer = {}
+        self.last_update_buffer_change = None
+        self.started_commit_updates = None
+        self.last_target_temp_room = None
+        self.frost_protection = False
+        self.frost_protection_heating_status_before = {}
 
         self.lang = self.service_config.get("language", "none")
 
@@ -184,13 +199,20 @@ class TrumaService(miqro.Service):
             exclusive=True,
         )
 
-    def _loop_step(self):
-        assert self.LOOPS is not None
+    def _wait_for_work(self, timeout: float) -> None:
+        """Wait on the LIN bus instead of on a sleep.
 
-        if not self.lin.response_waiting():
-            for loop in self.LOOPS:
-                loop.run_if_needed(self)
+        miqro calls this once per iteration of its own loop, after dispatching
+        incoming MQTT messages and running the loops that are due. For this
+        service the wait is the blocking serial read inside `loop_serial`,
+        which is what keeps the process off the CPU, so the framework's
+        timeout is deliberately ignored.
 
+        This used to be an override of `_loop_step` that did not chain, which
+        meant miqro's dispatch of incoming messages never ran: `set` commands
+        were received, queued and then silently discarded. Overriding the wait
+        instead leaves dispatch and loop scheduling with the framework.
+        """
         if not self._serial_is_alive():
             # no usable port - pace the retries, because loop_serial's
             # blocking read is what normally throttles this loop
@@ -198,6 +220,19 @@ class TrumaService(miqro.Service):
             return
 
         self.lin.loop_serial(self.serial, True)
+
+        # Stay on the bus while a transport-layer response is queued: getting
+        # it onto the wire is time critical, and returning here would let the
+        # loops publish over MQTT in between. This is what the old
+        # `if not self.lin.response_waiting()` guard around the loops did -
+        # but bounded, so that a master which stops polling mid-transfer costs
+        # at most RESPONSE_PUMP_MAX_SECONDS rather than the full
+        # RESPONSE_MAX_AGE_SECONDS it takes lin to expire the response.
+        deadline = monotonic() + self.RESPONSE_PUMP_MAX_SECONDS
+        while self.lin.response_waiting() and monotonic() < deadline:
+            if not self._serial_is_alive():
+                return
+            self.lin.loop_serial(self.serial, True)
 
     def _serial_is_alive(self):
         """Reopen the serial port if it has gone silent for too long.
@@ -269,110 +304,151 @@ class TrumaService(miqro.Service):
             only_if_changed=self.VALUE_UPDATE_MAX_INTERVAL,
         )
 
+    def _reject_set_message(self, topic, reason):
+        """Report a `set` message that will not be applied, and queue nothing.
+
+        Rejected values used to stay in the buffer and blow up in set_status a
+        second later, where the report blamed the conversion layer instead of
+        the validation that had already turned the value down.
+        """
+        self.log.error(f"Rejected set/{topic}: {reason}")
+        self.publish("error", f"Rejected set/{topic}: {reason}. Setting not applied.")
+
     @miqro.handle("set/#")
     def handle_set_message(self, msg, topic):
         self.log.info(f"Received set message {msg} on topic {topic}")
+
         # Instead of pushing updates to inetapp immediately, we collect them and
         # send them all at once. This is to avoid sending multiple updates to the
         # same value in a short time frame and also helps with values that depend
         # on each other, e.g., the heating mode and heating temperature.
-        self.updates_buffer[topic] = msg
+        #
+        # Nothing reaches the buffer before it has been validated - see
+        # _reject_set_message.
+        updates = self._updates_for_set_message(msg, topic)
+        if not updates:
+            return
+
+        self.updates_buffer.update(updates)
         self.last_update_buffer_change = datetime.now()
 
+        # Only the commands actually needed for these keys have to be known;
+        # asking whether *every* command is ready reports a blockage that does
+        # not exist on installations whose CP Plus never sends some of them.
+        if not self.inetapp.can_send_updates(self.updates_buffer.keys()):
+            message = (
+                "Cannot send updates to inetapp yet, the CP Plus has not sent the "
+                "status buffer for these settings so far. Changes will be delayed "
+                "until it does."
+            )
+            self.log.warning(message)
+            self.publish("error", message)
+
+    def _updates_for_set_message(self, msg, topic):
+        """Validate one `set` message and return the values to buffer.
+
+        Returns an empty dict when the message is rejected or has nothing to
+        contribute, in which case the buffer is left untouched.
+        """
         # we need to work with the translated values for the heating mode
         _off = TRANSLATIONS_STATES[self.lang]["heating_mode"][0]
         _eco = TRANSLATIONS_STATES[self.lang]["heating_mode"][1]
         _boost = TRANSLATIONS_STATES[self.lang]["heating_mode"][10]
 
-        # Synthetic on/off switch
+        updates = {}
+
+        def buffered(key, default):
+            """Value this key will have once `updates` is applied."""
+            if key in updates:
+                return updates[key]
+            return self.updates_buffer.get(key, default)
+
+        # Synthetic on/off switch - never queued under its own topic
         if topic == "mode":
             if msg == "heat":
                 # Restore last target temperature room or set to default if not available
                 if (
                     self.last_target_temp_room is not None
-                    and int(self.last_target_temp_room) >= self.TRUMA_MIN_TEMP
+                    and int(float(self.last_target_temp_room)) >= self.TRUMA_MIN_TEMP
                 ):
-                    self.updates_buffer["target_temp_room"] = self.last_target_temp_room
+                    updates["target_temp_room"] = self.last_target_temp_room
                 else:
-                    self.updates_buffer["target_temp_room"] = str(
+                    updates["target_temp_room"] = str(
                         self.truma_default_target_temp_room
                     )
                 # Set heating mode to default
-                self.updates_buffer["heating_mode"] = self.truma_default_heating_mode
+                updates["heating_mode"] = self.truma_default_heating_mode
                 self.log.info("Turning heating on")
             elif msg == "off":
-                self.updates_buffer["heating_mode"] = _off
-                self.updates_buffer["target_temp_room"] = (
-                    "0"  # Truma cannot heat below 5°C
-                )
+                updates["heating_mode"] = _off
+                updates["target_temp_room"] = "0"  # Truma cannot heat below 5°C
                 self.log.info("Turning heating off")
             else:
-                self.log.error(
-                    f"Invalid mode value {msg}. Only 'heat' and 'off' are allowed."
+                self._reject_set_message(
+                    topic, f"invalid mode value {msg!r}, only 'heat' and 'off' allowed"
                 )
-            # No further processing needed
-            del self.updates_buffer[topic]
-            return
+            return updates
 
         # Sanity check / automation for the dependency between room temperature and heating mode
         if topic == "target_temp_room":  # Only react to changes in the room temperature
             try:
                 target_temp = int(float(msg))
-                self.updates_buffer[topic] = str(target_temp)  # store as integer string
             except ValueError:
-                self.log.error("Invalid target temperature value")
-                return
+                self._reject_set_message(
+                    topic, f"invalid target temperature value {msg!r}"
+                )
+                return {}
+            updates[topic] = str(target_temp)  # store as integer string
 
             # Implement automatism to set the heating mode to "eco" if it is off when a temperature > 5°C is set.
             if target_temp >= self.TRUMA_MIN_TEMP:  # If it is desired to heat the room
-                if (
-                    "heating_mode" in self.updates_buffer
-                    and self.updates_buffer["heating_mode"] == _off
-                ) or (
-                    "heating_mode" not in self.updates_buffer
-                    and self.inetapp.get_status("heating_mode", _off) == _off
-                ):
-                    self.updates_buffer["heating_mode"] = (
-                        self.truma_default_heating_mode
-                    )
+                current_mode = buffered(
+                    "heating_mode", self.inetapp.get_status("heating_mode", _off)
+                )
+                if current_mode == _off:
+                    updates["heating_mode"] = self.truma_default_heating_mode
                     self.log.info(
                         "Setting heating mode to default heating mode as a temperature > 5°C was set"
                     )
                 else:
                     self.log.info(
-                        f"Heating mode is already set to '{self.updates_buffer.get('heating_mode', '???')}' (in updates) or '{self.inetapp.get_status('heating_mode', '???')}' (in last truma status), no change necessary"
+                        f"Heating mode is already set to '{current_mode}', no change necessary"
                     )
 
             # The other way round: If the target temperature is set to lower than 5°C, turn off the heating.
             else:
-                self.updates_buffer["heating_mode"] = _off
-                self.updates_buffer["target_temp_room"] = (
-                    "0"  # Truma cannot heat below 5°C
-                )
+                updates["heating_mode"] = _off
+                updates["target_temp_room"] = "0"  # Truma cannot heat below 5°C
                 self.log.info(
                     "Turning off heating as temperature was set to 5°C or lower"
                 )
 
         # Similar for heating mode
         elif topic == "heating_mode":
+            if msg not in [_off, _eco, _boost]:
+                self._reject_set_message(
+                    topic,
+                    f"invalid heating mode value {msg!r}, only "
+                    f"{_off!r}, {_eco!r} and {_boost!r} allowed",
+                )
+                return {}
+
+            updates[topic] = msg
+
             # And if the heating mode is turned off, set the target temperature to 0°C.
             if msg == _off:
-                self.updates_buffer["target_temp_room"] = "0"
+                updates["target_temp_room"] = "0"
                 self.log.info(
                     "Setting target temperature to 0°C as heating was turned off"
                 )
             # If the heating mode is set to "eco" or "boost", set the target temperature to 18°C.
-            elif msg in [_eco, _boost]:
-                if (
-                    "target_temp_room" in self.updates_buffer
-                    and int(self.updates_buffer["target_temp_room"])
-                    < self.TRUMA_MIN_TEMP
-                ) or (
-                    "target_temp_room" not in self.updates_buffer
-                    and int(self.inetapp.get_status("target_temp_room", "0"))
-                    < self.TRUMA_MIN_TEMP
-                ):
-                    self.updates_buffer["target_temp_room"] = str(
+            else:
+                current_temp = buffered(
+                    "target_temp_room",
+                    self.inetapp.get_status("target_temp_room", "0"),
+                )
+                if int(float(current_temp)) < self.TRUMA_MIN_TEMP:
+                    updates["target_temp_room"] = str(
                         self.truma_default_target_temp_room
                     )
                     self.log.info(
@@ -382,90 +458,114 @@ class TrumaService(miqro.Service):
                     self.log.info(
                         "Target temperature is already set to a value > 5°C, no change necessary"
                     )
-            else:
-                self.log.error(
-                    f"Invalid heating mode value {msg}. Only '{_off}', '{_eco}' and '{_boost}' are allowed."
-                )
 
         # parse date/time for clock setting
         elif topic == "wall_time":
+            invalid = "invalid time format, expected HH:MM:SS"
             try:
                 hours, minutes, seconds = msg.split(":")
             except ValueError:
-                self.log.error("Invalid time format (expected HH:MM:SS format)")
-                return
+                self._reject_set_message(topic, invalid)
+                return {}
 
             if not hours.isdigit() or not minutes.isdigit() or not seconds.isdigit():
-                self.log.error(
-                    "Invalid time format (expected HH:MM:SS format) - non-numeric values found"
-                )
-                return
+                self._reject_set_message(topic, f"{invalid} - non-numeric values found")
+                return {}
 
-            if (
-                int(hours) > 23
-                or int(hours) < 0
-                or int(minutes) > 59
-                or int(minutes) < 0
-                or int(seconds) > 59
-                or int(seconds) < 0
-            ):
-                self.log.error(
-                    "Invalid time format (expected HH:MM:SS format) - values out of range"
-                )
-                return
+            if int(hours) > 23 or int(minutes) > 59 or int(seconds) > 59:
+                self._reject_set_message(topic, f"{invalid} - values out of range")
+                return {}
 
-            del self.updates_buffer[topic]
-            self.updates_buffer["wall_time_hours"] = hours
-            self.updates_buffer["wall_time_minutes"] = minutes
-            self.updates_buffer["wall_time_seconds"] = seconds
+            # the combined topic itself is not a writable key
+            updates["wall_time_hours"] = hours
+            updates["wall_time_minutes"] = minutes
+            updates["wall_time_seconds"] = seconds
 
-        if not self.inetapp.can_send_updates():
-            msg = "Cannot send updates to inetapp, no status received from CP Plus yet. Changes will be delayed until status received."
-            self.log.error(msg)
-            self.publish("error", msg)
+        else:
+            updates[topic] = msg
+
+        return updates
 
     @miqro.loop(seconds=0.1)
     def commit_updates(self):
-        # exit the application if it takes too long to commit updates
+        # Give up on updates that the CP Plus never collected. This used to
+        # call sys.exit(1) instead, which destroyed all state over what is a
+        # normal condition on a standby CP Plus.
         if self.started_commit_updates is not None:
-            if datetime.now() - self.started_commit_updates > self.MAX_UPDATE_WAIT:
-                self.log.exception(
-                    "Taking too long to commit updates, resetting inetapp"
+            waited = datetime.now() - self.started_commit_updates
+            if waited > self.MAX_UPDATE_WAIT:
+                self.log.warning(
+                    "Giving up on updates after %.0fs (updates_to_send=%s, "
+                    "pending=%s); the CP Plus never completed the exchange",
+                    waited.total_seconds(),
+                    self.inetapp.updates_to_send,
+                    {
+                        hex(k): c.updates_pending
+                        for k, c in self.inetapp.COMMANDS.items()
+                    },
                 )
-                sys.exit(1)
+                self.publish(
+                    "error",
+                    f"gave up on pending updates after "
+                    f"{waited.total_seconds():.0f}s",
+                )
+                self.inetapp.updates_to_send = {}
+                for command in self.inetapp.COMMANDS.values():
+                    command.updates_pending = False
+                self.started_commit_updates = None
+                return
 
         if self.last_update_buffer_change is None:
             return
         if datetime.now() - self.last_update_buffer_change < self.updates_buffer_time:
             return
 
-        self.log.info(f"Committing updates {self.updates_buffer}")
+        # Work on a snapshot and remove exactly what was committed afterwards.
+        # Replacing the whole buffer would drop, without a trace, anything that
+        # arrived while set_status was running.
+        committed = dict(self.updates_buffer)
+        if not committed:
+            self.last_update_buffer_change = None
+            return
+
+        self.log.info(f"Committing updates {committed}")
         self.started_commit_updates = datetime.now()
-        for topic, msg in self.updates_buffer.items():
+        for topic, value in committed.items():
             try:
-                self.inetapp.set_status(topic, msg)
+                self.inetapp.set_status(topic, value)
             except Exception as e:
                 self.log.exception(e)
-                # send via mqtt
-                self.publish("error", str(e))
+                # send via mqtt - say which setting was lost, not just why
+                self.publish(
+                    "error",
+                    f"Could not apply {topic}={value!r}, setting discarded: {e}",
+                )
 
-        self.updates_buffer = {}
-        self.last_update_buffer_change = None
+        for topic, value in committed.items():
+            # leave anything that was overwritten in the meantime
+            if self.updates_buffer.get(topic, object()) == value:
+                del self.updates_buffer[topic]
+
+        if not self.updates_buffer:
+            self.last_update_buffer_change = None
 
     @miqro.loop(seconds=0.3)
     def send_update_status(self):
         _ = TRANSLATIONS_STATES[self.lang]["update_status"]
         if self.last_update_buffer_change is not None:
-            if not self.inetapp.can_send_updates():
+            if not self.inetapp.can_send_updates(self.updates_buffer.keys()):
                 status = _["waiting_for_cp_plus"]
             else:
                 status = _["waiting_commit"]
         elif self.inetapp.updates_to_send:
             status = _["waiting_truma"]
-        elif self.inetapp.updates_pending():
-            status = _["waiting_truma"]
         else:
-            status = _["idle"]
+            # The upload is what we were waiting for. The CP Plus sending a
+            # buffer of the same type back afterwards is a confirmation, not
+            # part of the delivery contract - so stop the clock here.
+            status = (
+                _["waiting_truma"] if self.inetapp.updates_pending() else _["idle"]
+            )
             self.started_commit_updates = None
         self.publish("update_status", status, only_if_changed=timedelta(seconds=60))
 

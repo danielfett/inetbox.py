@@ -91,7 +91,7 @@ def string_to_el_power_code(string, lang) -> int:
         if name == string:
             return code
 
-    raise ValueError(f"Invalid electric heating power code: {code}")
+    raise ValueError(f"Invalid electric heating power code: {string}")
 
 
 def energy_mix_code_to_string(energy_mix_code, lang) -> str:

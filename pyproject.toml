@@ -7,12 +7,21 @@ readme = "README.md"
 packages = [{include = "inetbox"}]
 
 [tool.poetry.dependencies]
-python = "^3.7"
+python = "^3.9"
 pyserial = "^3.5"
-miqro = ">=1.2.2"
+# 1.4.0 is the first release with Service._wait_for_work() and the
+# incoming-message queue; against anything older the service refuses to
+# start rather than never read the LIN bus - see TrumaService.__init__.
+miqro = "^1.4.0"
 bitstruct = "^8.15.1"
 paho-mqtt = {version = "^1.6.1", optional = true}
 python-dateutil = ">2.8.0"
+
+[tool.poetry.group.dev.dependencies]
+pytest = ">=7.0"
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
 
 [build-system]
 requires = ["poetry-core"]

@@ -6,13 +6,13 @@ from .lin import Lin
 from .tools import format_bytes, calculate_checksum
 from . import conversions as cnv
 import bitstruct
-from typing import List, Tuple
-from random import randrange
+from typing import Iterable, List, Optional, Tuple
 
 
 class InetboxLINProtocol:
     NODE_ADDRESS = 0x03
     IDENTIFIER = bytes([0x17, 0x46, 0x00, 0x1F])
+    SID_READ_BY_IDENTIFIER = 0xB2
 
     transportlayer_received_request_sid = None
     transportlayer_received_request_payload = None
@@ -20,6 +20,9 @@ class InetboxLINProtocol:
 
     def __init__(self, app, debug=False):
         self.app = app
+        # last value announced on PID 0x18, so the transition can be logged once
+        # instead of on every poll
+        self._announced_data = False
         self.log = logging.getLogger("inet.protocol")
         # when requested, set logger to debug level
         self.log.setLevel(logging.DEBUG if debug else logging.INFO)
@@ -99,6 +102,14 @@ class InetboxLINProtocol:
                     self.transportlayer_received_request_payload,
                 )
                 self.transportlayer_received_request_payload = None
+        elif sid == self.SID_READ_BY_IDENTIFIER and len(payload) >= 5:
+            # A Read by Identifier for some other device on the bus. Correctly
+            # ignored, but frequent enough that logging it like an unknown
+            # message makes every capture look broken.
+            self.log.debug(
+                f"Read by Identifier for {format_bytes(payload[1:5])}, not for us "
+                f"({format_bytes(self.IDENTIFIER)})."
+            )
         else:
             sid = f"{sid:x}" if isinstance(sid, int) else sid
             self.log.debug(
@@ -124,12 +135,24 @@ class InetboxLINProtocol:
             self.app.process_status_buffer_update(request_payload)
 
         elif sid == 0xBA:
-            self.log.debug("Received request for data upload: %s", request_payload)
+            self.log.info("CP Plus asked for a data upload.")
+            self.log.debug("Request payload: %s", request_payload)
 
             send_buffer = self.app._get_status_buffer_for_writing()
 
             if send_buffer is None:
-                self.log.debug("Not responding, waiting for status message first!")
+                if self.app.updates_to_send:
+                    # We told the CP Plus we had data (0xFF on PID 0x18), it
+                    # came to collect it, and we cannot build the buffer. This
+                    # repeats forever unless somebody notices - so say so.
+                    self.log.warning(
+                        "Asked for an upload but could not build a buffer; "
+                        "%d update(s) still queued: %s",
+                        len(self.app.updates_to_send),
+                        self.app.updates_to_send,
+                    )
+                else:
+                    self.log.debug("Asked for an upload but nothing is queued.")
                 return
 
             # pad the buffer with zeros
@@ -149,7 +172,11 @@ class InetboxLINProtocol:
                 ]
             )
 
-            self.log.info("Uploading new status data.")
+            self.log.info(
+                "Uploaded status buffer cid %02x, command counter %s.",
+                send_buffer[len(self.app.STATUS_BUFFER_PREAMBLE) + 1],
+                send_buffer[len(self.app.STATUS_BUFFER_PREAMBLE) + 2],
+            )
 
     def receive_read_by_identifier_request(self, lin: Lin):
         self.log.debug("Received read by identifier request.")
@@ -161,11 +188,21 @@ class InetboxLINProtocol:
         self.log.debug(
             f"Responding to 08 message (updates_to_send={self.app.updates_to_send})!"
         )
+        has_data = bool(self.app.updates_to_send)
+        if has_data != self._announced_data:
+            if has_data:
+                self.log.info(
+                    "Telling the CP Plus we have data for it: %s",
+                    self.app.updates_to_send,
+                )
+            else:
+                self.log.info("Nothing more to announce to the CP Plus.")
+            self._announced_data = has_data
         return bytes(
             [
                 # FE: app waits for updates from CP Plus
                 # FF: app has an update ready for CP plus
-                0xFF if self.app.updates_to_send else 0xFE,
+                0xFF if has_data else 0xFE,
                 0xFF,
                 0xFF,
                 0xFF,
@@ -198,10 +235,29 @@ class TrumaCommand:
         cid,
         data_elements_rw: List[Tuple[str, str]],
         data_elements_r: List[Tuple[str, str]] = [],
+        duplicate_attributes_ok: Iterable[str] = (),
     ):
         self.cid = cid
         self.attributes_rw = [t[0] for t in data_elements_rw]
         self.attributes_r = [t[0] for t in data_elements_r]
+
+        # bitstruct unpacks into a dict, so a repeated field name collapses to
+        # a single value on read and is written back to *every* one of its
+        # offsets on write. Where the CP Plus genuinely mirrors a byte that is
+        # what we want, and the name is listed in duplicate_attributes_ok;
+        # anywhere else it is a copy-paste slip that silently corrupts the
+        # buffer, so refuse to build the command.
+        duplicates = sorted(
+            {n for n in self.attributes_rw if self.attributes_rw.count(n) > 1}
+        )
+        unexpected = [n for n in duplicates if n not in duplicate_attributes_ok]
+        if unexpected:
+            raise ValueError(
+                f"Command {cid:#04x} repeats the writable field name(s) "
+                f"{unexpected}; every occurrence would be written from the same "
+                f"value. Fix the names, or list them in duplicate_attributes_ok "
+                f"if the CP Plus really mirrors those bytes."
+            )
 
         self.bitstruct_read = bitstruct.compile(
             ">" + "".join([t[1] for t in data_elements_rw + data_elements_r]) + "<",
@@ -223,15 +279,23 @@ class TrumaCommand:
     def pack(self, data):
         if not self.can_send_updates:
             return None
-        
-        self.updates_pending = True
+
         try:
-            return self.bitstruct_write.pack(data)
-        except bitstruct.Error:
-            # not all required data in status buffer yet
-            self.can_send_updates = False
+            packed = self.bitstruct_write.pack(data)
+        except bitstruct.Error as e:
+            # A missing *value* says nothing about whether we know the shape of
+            # this buffer, so can_send_updates is deliberately left alone here.
+            missing = [a for a in self.attributes_rw if a not in data]
+            logging.getLogger("inet.app").warning(
+                "Cannot pack cid %02x: missing=%s (%s)", self.cid, missing, e
+            )
+            # nothing was handed over, so nothing is pending
+            self.updates_pending = False
             return None
-        
+
+        self.updates_pending = True
+        return packed
+
     @property
     def cid_write(self):
         return self.cid - 1
@@ -310,7 +374,10 @@ class InetboxApp:
             ("_recv_status_u3", "u8"),  # 0x03
             ("el_power_level", "u16"),  # 0x04, 0x05
             ("target_temp_water", "u16"),  # 0x06, 0x07
+            # deliberate duplicate: the CP Plus mirrors the power level here,
+            # and expects the same value written to both offsets
             ("el_power_level", "u16"),  # 0x08, 0x09
+            # deliberate duplicate, same reasoning as el_power_level above
             ("energy_mix", "u8"),  # 0x0A
             ("energy_mix", "u8"),  # 0x0B
         ],
@@ -321,6 +388,7 @@ class InetboxApp:
             ("error_code", "r16"),  # 0x11
             ("_recv_status_u10", "u8"),  # 0x12
         ],
+        duplicate_attributes_ok=("el_power_level", "energy_mix"),
     )
 
     COMMAND_TIMER = TrumaCommand(
@@ -338,14 +406,14 @@ class InetboxApp:
             ("_timer_unknown9", "u8"),
             ("_timer_unknown10", "u8"),
             ("_timer_unknown11", "u8"),
-            ("_timer_unknown10", "u8"),
-            ("_timer_unknown11", "u8"),
             ("_timer_unknown12", "u8"),
             ("_timer_unknown13", "u8"),
             ("_timer_unknown14", "u8"),
             ("_timer_unknown15", "u8"),
             ("_timer_unknown16", "u8"),
             ("_timer_unknown17", "u8"),
+            ("_timer_unknown18", "u8"),
+            ("_timer_unknown19", "u8"),
             ("timer_active", "u8"),
             ("timer_start_minutes", "u8"),
             ("timer_start_hours", "u8"),
@@ -428,19 +496,30 @@ class InetboxApp:
 
     STATUS_HEADER_CHECKSUM_START = 8
 
-    status = {"_command_counter": randrange(0xFF)}
-
-    status_updated = False
-
-    updates_to_send = {}
-
-    display_status = {}
-
     lang = "none"
 
     def __init__(self, debug, lang):
         self.lang = lang
         self.log = logging.getLogger("inet.app")
+
+        # Per-instance state. These used to be class attributes, which meant
+        # the first assignment (e.g. `self.updates_to_send = {}`) silently
+        # switched from the shared class dict to an instance dict partway
+        # through the process lifetime.
+        #
+        # The command counter starts at 0 rather than at a random value: the
+        # CP Plus's own counter starts at 0 too, and only a 0x0D status buffer
+        # ever syncs ours to it. A random seed turned "does the panel accept
+        # our counter?" into a per-process coin flip instead of a reproducible
+        # condition.
+        self.status = {"_command_counter": 0}
+        self.status_updated = False
+        self.updates_to_send = {}
+        self.display_status = {}
+
+        # whether a 0x0D buffer has ever told us the CP Plus's counter
+        self._command_counter_synced = False
+        self._warned_command_counter_unsynced = False
 
         # monotonic timestamp of the last valid status buffer received from
         # the CP Plus, or None while we have never heard from it. This is
@@ -575,6 +654,7 @@ class InetboxApp:
         if command_id == self.STATUS_BUFFER_COMMAND_ID_COMMAND_COUNTER:
             self.log.info(f"Received command counter update, now: {command_counter}")
             self.status["_command_counter"] = command_counter
+            self._command_counter_synced = True
             return
 
         # get status buffer info for header
@@ -584,12 +664,23 @@ class InetboxApp:
             self.log.warning(f"Unknown status buffer type {header}")
             return
 
+        # A buffer of a cid we have just written is the CP Plus echoing our
+        # upload back - the only confirmation we ever get that it took.
+        was_pending = command.updates_pending
+
         # parse status buffer, starting after the header
         parsed_status_buffer = command.parse(
             status_buffer[len(self.STATUS_BUFFER_PREAMBLE) + 4 :]
         )
 
-        # if any of the values is new, set self.status_updated to True, ignore underscore keys
+        if was_pending:
+            self.log.info(
+                f"CP Plus sent back a buffer of type {command_id:#04x} - "
+                f"our update was picked up."
+            )
+
+        # note that this does not compare against the previous contents: every
+        # received buffer counts as an update
         self.status_updated = True
         self.status.update(parsed_status_buffer)
 
@@ -616,8 +707,17 @@ class InetboxApp:
             self.updates_to_send = {}
             return None
 
-        # increase output message counter
-        self.status["_command_counter"] = (self.status["_command_counter"] + 1) % 0xFF
+        if not (
+            self._command_counter_synced or self._warned_command_counter_unsynced
+        ):
+            # No 0x0D buffer has ever been seen, so our counter is a free
+            # running guess rather than the panel's. Say so once, in case a
+            # write is ignored.
+            self.log.info(
+                "Uploading with an unsynchronised command counter - no 0x0D "
+                "buffer has been received from the CP Plus so far."
+            )
+            self._warned_command_counter_unsynced = True
 
         # get current status buffer contents as dict
         binary_buffer_contents = command.pack(
@@ -626,6 +726,10 @@ class InetboxApp:
         if binary_buffer_contents is None:
             self.log.debug("Not all required data in status buffer yet.")
             return None
+
+        # increase output message counter - only now that there is something to
+        # count, so a failed pack does not walk it forward
+        self.status["_command_counter"] = (self.status["_command_counter"] + 1) % 0xFF
 
         # calculate checksum
         checksum = calculate_checksum(
@@ -688,10 +792,9 @@ class InetboxApp:
             raise Exception(
                 f"Conversion function not defined - is this key ({key}) writable?"
             )
-        self.log.debug(f"Setting {key} to {value}")
-        self.updates_to_send[key] = self.STATUS_CONVERSION_FUNCTIONS[key][1](
-            value, self.lang
-        )
+        converted = self.STATUS_CONVERSION_FUNCTIONS[key][1](value, self.lang)
+        self.log.info(f"Accepted {key}={value!r} (encoded as {converted!r})")
+        self.updates_to_send[key] = converted
 
     def get_all(self):
         self.status_updated = False
@@ -711,5 +814,29 @@ class InetboxApp:
     def updates_pending(self):
         return any(c.updates_pending for c in self.COMMANDS.values())
 
-    def can_send_updates(self):
-        return all(c.can_send_updates for c in self.COMMANDS.values())
+    def _command_for_key(self, key: str) -> Optional[TrumaCommand]:
+        return next(
+            (c for c in self.COMMANDS.values() if key in c.attributes_rw), None
+        )
+
+    def can_send_updates(self, keys: Optional[Iterable[str]] = None) -> bool:
+        """True if the command(s) needed for `keys` have been seen from the CP Plus.
+
+        A command can only be written once the CP Plus has sent a buffer of
+        that type, because the write reuses the values we do not touch.
+
+        `keys=None` means "at least one command is armed". This used to require
+        *all three*, which is unreachable on installations whose CP Plus never
+        emits the 0x3D timer buffer - and it gated nothing, so the only effect
+        was an error message about a blockage that did not exist.
+        """
+        if keys is None:
+            return any(c.can_send_updates for c in self.COMMANDS.values())
+
+        for key in keys:
+            if key.startswith("_"):
+                continue
+            command = self._command_for_key(key)
+            if command is None or not command.can_send_updates:
+                return False
+        return True
