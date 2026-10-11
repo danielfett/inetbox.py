@@ -185,19 +185,32 @@ class TrumaCommand:
         cid,
         data_elements_rw: List[Tuple[str, str]],
         data_elements_r: List[Tuple[str, str]] = [],
+        data_elements_w: List[Tuple[str, str]] = None,
     ):
+        """
+        data_elements_rw: leading part of the status buffer, readable and writable
+        data_elements_r:  trailing part, read-only
+        data_elements_w:  layout of the write buffer when it is not simply
+                          data_elements_rw (e.g. the timer, whose write buffer skips
+                          some read-only bytes). Every name must also appear in the
+                          read layout.
+        """
         self.cid = cid
-        self.attributes_rw = [t[0] for t in data_elements_rw]
         self.attributes_r = [t[0] for t in data_elements_r]
+        read_elements = data_elements_rw + data_elements_r
+        if data_elements_w is None:
+            data_elements_w = data_elements_rw
+        self.attributes_rw = [t[0] for t in data_elements_w]
+        self.attributes_r = [a for a in self.attributes_r if a not in self.attributes_rw]
 
         self.bitstruct_read = bitstruct.compile(
-            ">" + "".join([t[1] for t in data_elements_rw + data_elements_r]) + "<",
-            names=self.attributes_rw + self.attributes_r,
+            ">" + "".join([t[1] for t in read_elements]) + "<",
+            names=[t[0] for t in read_elements],
         )
         self.read_len = self.bitstruct_read.calcsize() // 8
 
         self.bitstruct_write = bitstruct.compile(
-            ">" + "".join([t[1] for t in data_elements_rw]) + "<",
+            ">" + "".join([t[1] for t in data_elements_w]) + "<",
             names=self.attributes_rw,
         )
         self.write_len = self.bitstruct_write.calcsize() // 8
@@ -310,35 +323,33 @@ class InetboxApp:
         ],
     )
 
+    # Timer status buffer "18 3D" (24 bytes): the 12 settings bytes of the heater
+    # command, 7 unknown bytes, then the timer itself. The write buffer "11 3C"
+    # (17 bytes) is the 12 settings bytes followed directly by the 5 timer bytes.
+    # Both verified on a CP Plus C3.00.00 (2026-10-04); the status layout matches
+    # the two real buffers quoted in esphome-truma_inetbox (StatusFrameTimer).
+    _TIMER_SETTINGS = [
+        ("timer_target_temp_room", "u16"),  # 0x00, 0x01
+        ("timer_heating_mode", "u8"),  # 0x02
+        ("_timer_status_u3", "u8"),  # 0x03
+        ("timer_el_power_level", "u16"),  # 0x04, 0x05
+        ("timer_target_temp_water", "u16"),  # 0x06, 0x07
+        ("timer_el_power_level", "u16"),  # 0x08, 0x09
+        ("timer_energy_mix", "u8"),  # 0x0A
+        ("timer_energy_mix", "u8"),  # 0x0B
+    ]
+    _TIMER_CLOCK = [
+        ("timer_active", "u8"),
+        ("timer_start_minutes", "u8"),
+        ("timer_start_hours", "u8"),
+        ("timer_stop_minutes", "u8"),
+        ("timer_stop_hours", "u8"),
+    ]
     COMMAND_TIMER = TrumaCommand(
         0x3D,
-        [
-            ("timer_target_temp_room", "u16"),
-            ("timer_heating_mode", "u8"),
-            ("_timer_unknown1", "u8"),
-            ("timer_el_power_level", "u8"),
-            ("_timer_unknown5", "u8"),
-            ("timer_target_temp_water", "u16"),
-            ("_timer_unknown6", "u8"),
-            ("_timer_unknown7", "u8"),
-            ("_timer_unknown8", "u8"),
-            ("_timer_unknown9", "u8"),
-            ("_timer_unknown10", "u8"),
-            ("_timer_unknown11", "u8"),
-            ("_timer_unknown10", "u8"),
-            ("_timer_unknown11", "u8"),
-            ("_timer_unknown12", "u8"),
-            ("_timer_unknown13", "u8"),
-            ("_timer_unknown14", "u8"),
-            ("_timer_unknown15", "u8"),
-            ("_timer_unknown16", "u8"),
-            ("_timer_unknown17", "u8"),
-            ("timer_active", "u8"),
-            ("timer_start_minutes", "u8"),
-            ("timer_start_hours", "u8"),
-            ("timer_stop_minutes", "u8"),
-            ("timer_stop_hours", "u8"),
-        ],
+        _TIMER_SETTINGS,
+        [(f"_timer_status_u{i}", "u8") for i in range(0x0C, 0x13)] + _TIMER_CLOCK,
+        data_elements_w=_TIMER_SETTINGS + _TIMER_CLOCK,
     )
 
     COMMAND_TIME = TrumaCommand(
@@ -397,6 +408,18 @@ class InetboxApp:
         "timer_target_temp_water": (
             cnv.water_temp_code_to_string,
             cnv.string_to_water_temp_code,
+        ),
+        "timer_heating_mode": (
+            cnv.heating_mode_to_string,
+            cnv.string_to_heating_mode,
+        ),
+        "timer_el_power_level": (
+            cnv.el_power_code_to_string,
+            cnv.string_to_el_power_code,
+        ),
+        "timer_energy_mix": (
+            cnv.energy_mix_code_to_string,
+            cnv.string_to_energy_mix_code,
         ),
         "timer_active": (
             cnv.bool_to_int,
